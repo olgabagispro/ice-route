@@ -1,0 +1,6 @@
+{
+  "name": "Ice Route",
+  "description": "Polar class navigation intelligence and ice stratification analysis tool.",
+  "requestFramePermissions": ["geolocation", "microphone"],
+  "majorCapabilities": ["AI Pathfinding", "Maritime Data Analysis"]
+}

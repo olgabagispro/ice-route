@@ -1,0 +1,93 @@
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "react-day-picker/dist/style.css";
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-background: #0a151c;
+  --color-surface: #121d25;
+  --color-surface-high: #162129;
+  --color-surface-highest: #2c363e;
+  
+  --color-primary: #90e0ff;
+  --color-primary-dim: #56d5ff;
+  --color-secondary: #42e8da;
+  --color-tertiary: #f3d192;
+  
+  --color-on-surface: #d9e4ef;
+  --color-on-surface-variant: #bcc8cf;
+  --color-outline: #3d494e;
+  --color-outline-variant: #869399;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-on-surface font-sans antialiased overflow-hidden;
+  }
+}
+
+/* Custom Utilities for Maritime Intelligence Look */
+.glass-panel {
+  @apply bg-surface/80 backdrop-blur-md border border-outline/30;
+}
+
+.technical-card {
+  @apply bg-surface-high border border-outline/20 relative overflow-hidden;
+}
+
+.champagne-corner {
+  @apply absolute w-1 h-1 border-tertiary;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  @apply bg-background;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-outline/50 rounded-full;
+}
+
+/* Leaflet Overrides for Dark Mode */
+.leaflet-container {
+  background: #050a0f !important;
+}
+
+.leaflet-tile-pane {
+  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
+
+.marker-container {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto !important;
+}
+
+.marker-dot {
+  @apply w-2 h-2 rounded-full bg-primary ring-2 ring-background transition-all duration-300;
+}
+
+.marker-dot-hovered {
+  @apply w-3.5 h-3.5 bg-secondary ring-4 ring-secondary/30 scale-125;
+}
+
+.marker-pulse {
+  @apply absolute w-8 h-8 border-2 border-secondary rounded-full animate-ping opacity-50;
+}
+
+.technical-tooltip.leaflet-tooltip {
+  @apply bg-transparent border-none shadow-none p-0;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+.technical-tooltip.leaflet-tooltip-top:before {
+  @apply hidden;
+}
+

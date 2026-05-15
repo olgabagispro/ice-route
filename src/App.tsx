@@ -162,8 +162,6 @@ const MobileNav = ({ activeTab, setActiveTab }: { activeTab: string; setActiveTa
 
 // --- Main Application ---
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
 // --- Regions and Zones ---
 const ICE_ZONES = [
   {
@@ -383,6 +381,13 @@ export default function App() {
     setIsLoadingChat(true);
 
     try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        setMessages(prev => [...prev, { role: "assistant", content: "Gemini API key is not configured. Add GEMINI_API_KEY to .env.local and restart the dev server." }]);
+        return;
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [...messages, userMsg].map(m => m.content).join("\n"),

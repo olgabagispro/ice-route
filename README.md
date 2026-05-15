@@ -15,6 +15,6 @@ View your app in AI Studio: https://ai.studio/apps/ea969a11-db91-40c9-be38-45d8e
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Set the `OPENAI_API_KEY` in [.env.local](.env.local) to your OpenAI API key. Optionally set `OPENAI_MODEL` to choose a different model.
 3. Run the app:
    `npm run dev`

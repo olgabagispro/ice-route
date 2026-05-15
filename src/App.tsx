@@ -44,7 +44,6 @@ import { twMerge } from "tailwind-merge";
 import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents, Tooltip, Polygon } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { GoogleGenAI } from "@google/genai";
 import { useIceLayers } from "./features/iceLayers/useIceLayers";
 import { IceLayerToggle } from "./features/iceLayers/IceLayerToggle";
 import { IceMetadataPopup } from "./features/iceLayers/IceMetadataPopup";
@@ -118,6 +117,62 @@ interface ChatMessage {
   content: string;
 }
 
+interface OpenAIResponse {
+  output_text?: string;
+  output?: Array<{
+    content?: Array<{
+      text?: string;
+      type?: string;
+    }>;
+  }>;
+  error?: {
+    message?: string;
+  };
+}
+
+const AI_SYSTEM_INSTRUCTION = "You are 'Ice Route AI', a specialized advisor for polar corridor navigation. You provide technical feedback on ice classes (Ice1-Ice3, Arc4-Arc9), sea states, and maritime security. Keep responses concise, professional, and slightly technical.";
+const FURBOATS_WIDGET_SCRIPT_ID = "furboats-voice-widget-script";
+const FURBOATS_WIDGET_ELEMENT_ID = "furboats-voice-agent-widget";
+const FURBOATS_WIDGET_URL = "https://furboats-openai-live-dev.denslov.workers.dev/widget/v1/furboats-voice-widget.js";
+const FURBOATS_WIDGET_BACKEND_URL = "https://furboats-openai-live-dev.denslov.workers.dev";
+
+function formatChatTranscript(messages: ChatMessage[]) {
+  return messages
+    .map((message) => `${message.role === "assistant" ? "Assistant" : "User"}: ${message.content}`)
+    .join("\n");
+}
+
+function getOpenAIResponseText(response: OpenAIResponse) {
+  if (response.output_text) {
+    return response.output_text;
+  }
+
+  return response.output
+    ?.flatMap((item) => item.content || [])
+    .map((content) => content.text)
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function positionFurboatsWidget(widget: HTMLElement) {
+  const style = document.createElement("style");
+  style.textContent = `
+    .root {
+      bottom: 104px;
+      right: 24px;
+    }
+
+    @media (max-width: 767px) {
+      .root {
+        bottom: 88px;
+        right: 16px;
+      }
+    }
+  `;
+  widget.shadowRoot?.append(style);
+}
+
 // --- Components ---
 
 const TechnicalBorder = () => (
@@ -161,8 +216,6 @@ const MobileNav = ({ activeTab, setActiveTab }: { activeTab: string; setActiveTa
 };
 
 // --- Main Application ---
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // --- Regions and Zones ---
 const ICE_ZONES = [
@@ -222,6 +275,50 @@ export default function App() {
   const [flyToPoint, setFlyToPoint] = useState<GeoPoint | null>(null);
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const mountWidget = async () => {
+      await customElements.whenDefined("furboats-voice-widget");
+      if (cancelled || document.getElementById(FURBOATS_WIDGET_ELEMENT_ID)) {
+        return;
+      }
+
+      const furboatsVoice = (window as any).FurboatsVoice;
+      const widget = furboatsVoice?.init?.({
+        backendUrl: FURBOATS_WIDGET_BACKEND_URL,
+        siteKey: "pk_test_furboats_arc",
+        agentId: "arc-yacht-advisor",
+        language: "en",
+      }) as HTMLElement | undefined;
+
+      if (widget) {
+        widget.id = FURBOATS_WIDGET_ELEMENT_ID;
+        positionFurboatsWidget(widget);
+      }
+    };
+
+    const existingScript = document.getElementById(FURBOATS_WIDGET_SCRIPT_ID) as HTMLScriptElement | null;
+    if (existingScript) {
+      mountWidget();
+    } else {
+      const script = document.createElement("script");
+      script.id = FURBOATS_WIDGET_SCRIPT_ID;
+      script.async = true;
+      script.src = FURBOATS_WIDGET_URL;
+      script.dataset.siteKey = "pk_test_furboats_arc";
+      script.dataset.agentId = "arc-yacht-advisor";
+      script.dataset.language = "en";
+      script.dataset.autoInit = "false";
+      script.addEventListener("load", mountWidget);
+      document.body.append(script);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -383,14 +480,31 @@ export default function App() {
     setIsLoadingChat(true);
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [...messages, userMsg].map(m => m.content).join("\n"),
-        config: {
-          systemInstruction: "You are 'Ice Route AI', a specialized advisor for polar corridor navigation. You provide technical feedback on ice classes (Ice1-Ice3, Arc4-Arc9), sea states, and maritime security. Keep responses concise, professional, and slightly technical.",
-        }
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        setMessages(prev => [...prev, { role: "assistant", content: "OpenAI API key is not configured. Add OPENAI_API_KEY to .env.local and restart the dev server." }]);
+        return;
+      }
+
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+          instructions: AI_SYSTEM_INSTRUCTION,
+          input: formatChatTranscript([...messages, userMsg]),
+        }),
       });
-      const content = response.text || "I'm having trouble retrieving data from the satellite. Please try again.";
+
+      const data = await response.json() as OpenAIResponse;
+      if (!response.ok) {
+        throw new Error(data.error?.message || "OpenAI request failed");
+      }
+
+      const content = getOpenAIResponseText(data) || "I'm having trouble retrieving data from the satellite. Please try again.";
       setMessages(prev => [...prev, { role: "assistant", content }]);
     } catch (error) {
       console.error("AI failed", error);

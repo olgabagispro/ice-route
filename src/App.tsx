@@ -131,6 +131,10 @@ interface OpenAIResponse {
 }
 
 const AI_SYSTEM_INSTRUCTION = "You are 'Ice Route AI', a specialized advisor for polar corridor navigation. You provide technical feedback on ice classes (Ice1-Ice3, Arc4-Arc9), sea states, and maritime security. Keep responses concise, professional, and slightly technical.";
+const FURBOATS_WIDGET_SCRIPT_ID = "furboats-voice-widget-script";
+const FURBOATS_WIDGET_ELEMENT_ID = "furboats-voice-agent-widget";
+const FURBOATS_WIDGET_URL = "https://furboats-openai-live-dev.denslov.workers.dev/widget/v1/furboats-voice-widget.js";
+const FURBOATS_WIDGET_BACKEND_URL = "https://furboats-openai-live-dev.denslov.workers.dev";
 
 function formatChatTranscript(messages: ChatMessage[]) {
   return messages
@@ -149,6 +153,24 @@ function getOpenAIResponseText(response: OpenAIResponse) {
     .filter(Boolean)
     .join("\n")
     .trim();
+}
+
+function positionFurboatsWidget(widget: HTMLElement) {
+  const style = document.createElement("style");
+  style.textContent = `
+    .root {
+      bottom: 104px;
+      right: 24px;
+    }
+
+    @media (max-width: 767px) {
+      .root {
+        bottom: 88px;
+        right: 16px;
+      }
+    }
+  `;
+  widget.shadowRoot?.append(style);
 }
 
 // --- Components ---
@@ -253,6 +275,50 @@ export default function App() {
   const [flyToPoint, setFlyToPoint] = useState<GeoPoint | null>(null);
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const mountWidget = async () => {
+      await customElements.whenDefined("furboats-voice-widget");
+      if (cancelled || document.getElementById(FURBOATS_WIDGET_ELEMENT_ID)) {
+        return;
+      }
+
+      const furboatsVoice = (window as any).FurboatsVoice;
+      const widget = furboatsVoice?.init?.({
+        backendUrl: FURBOATS_WIDGET_BACKEND_URL,
+        siteKey: "pk_test_furboats_arc",
+        agentId: "arc-yacht-advisor",
+        language: "en",
+      }) as HTMLElement | undefined;
+
+      if (widget) {
+        widget.id = FURBOATS_WIDGET_ELEMENT_ID;
+        positionFurboatsWidget(widget);
+      }
+    };
+
+    const existingScript = document.getElementById(FURBOATS_WIDGET_SCRIPT_ID) as HTMLScriptElement | null;
+    if (existingScript) {
+      mountWidget();
+    } else {
+      const script = document.createElement("script");
+      script.id = FURBOATS_WIDGET_SCRIPT_ID;
+      script.async = true;
+      script.src = FURBOATS_WIDGET_URL;
+      script.dataset.siteKey = "pk_test_furboats_arc";
+      script.dataset.agentId = "arc-yacht-advisor";
+      script.dataset.language = "en";
+      script.dataset.autoInit = "false";
+      script.addEventListener("load", mountWidget);
+      document.body.append(script);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor),

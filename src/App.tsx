@@ -1635,14 +1635,14 @@ export default function App() {
         {activeTab === "fleet" ? (
           <main className="flex-1 h-full min-h-0 overflow-hidden">
             {selectedVessel ? (
-              <VesselDetail vessel={selectedVessel} onBack={() => setSelectedVessel(null)} />
+              <VesselDetail vessel={selectedVessel} onBack={() => setSelectedVessel(null)} t={t} />
             ) : (
-              <SavedVessels onSelectVessel={setSelectedVessel} />
+              <SavedVessels onSelectVessel={setSelectedVessel} t={t} />
             )}
           </main>
         ) : activeTab === "archive" ? (
           <main className="flex-1 h-full min-h-0 overflow-hidden">
-            <SavedRoutes onSwitchToFleet={() => setActiveTab("fleet")} />
+            <SavedRoutes onSwitchToFleet={() => setActiveTab("fleet")} t={t} />
           </main>
         ) : (
           <main className="flex-1 relative bg-[#050A0F] overflow-hidden">

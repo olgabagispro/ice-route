@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useState, useEffect } from "react";
+import type { Translate } from "../i18n";
 
 const INITIAL_ROUTES = [
   {
@@ -108,9 +109,10 @@ const VESSELS = [
 
 interface SavedRoutesProps {
   onSwitchToFleet?: () => void;
+  t: Translate;
 }
 
-export function SavedRoutes({ onSwitchToFleet }: SavedRoutesProps) {
+export function SavedRoutes({ onSwitchToFleet, t }: SavedRoutesProps) {
   const [routes, setRoutes] = useState<any[]>([]);
 
   useEffect(() => {
@@ -131,20 +133,20 @@ export function SavedRoutes({ onSwitchToFleet }: SavedRoutesProps) {
         {/* Context Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
           <div className="space-y-2">
-            <h2 className="text-4xl md:text-5xl font-bold text-on-surface uppercase tracking-tighter">Saved Routes</h2>
+            <h2 className="text-4xl md:text-5xl font-bold text-on-surface uppercase tracking-tighter">{t("savedRoutesTitle")}</h2>
             <p className="text-sm md:text-base text-on-surface-variant max-w-xl font-medium leading-relaxed">
-              Historical navigation data and saved profile configurations for ice-capable vessels within the Arctic sector.
+              {t("savedRoutesDescription")}
             </p>
           </div>
           <div className="flex gap-2 p-1 bg-surface-highest/20 border border-outline/20 backdrop-blur-md">
             <button className="px-6 py-2 bg-secondary text-on-secondary font-bold font-mono text-[10px] tracking-widest transition-all">
-              ROUTE HISTORY
+              {t("routeHistory")}
             </button>
             <button 
               onClick={onSwitchToFleet}
               className="px-6 py-2 text-on-surface-variant hover:text-on-surface font-bold font-mono text-[10px] tracking-widest transition-all"
             >
-              SAVED VESSELS
+              {t("savedVesselsTitle")}
             </button>
           </div>
         </div>
@@ -172,7 +174,7 @@ export function SavedRoutes({ onSwitchToFleet }: SavedRoutesProps) {
                   <div className="flex-1 p-6 flex flex-col justify-between">
                     <div className="flex justify-between items-start mb-4">
                       <div>
-                        <p className="text-[10px] font-bold font-mono text-secondary mb-1 tracking-[0.2em] uppercase">ROUTE ID: {route.id}</p>
+                        <p className="text-[10px] font-bold font-mono text-secondary mb-1 tracking-[0.2em] uppercase">{t("routeId")}: {route.id}</p>
                         <h3 className="text-xl font-bold text-on-surface tracking-tight">{route.vessel}</h3>
                       </div>
                       <div className="text-right flex flex-col items-end gap-2">
@@ -194,7 +196,7 @@ export function SavedRoutes({ onSwitchToFleet }: SavedRoutesProps) {
                     <div className="flex flex-wrap gap-6 items-center pt-4 border-t border-outline/10">
                       <div className="flex items-center gap-2">
                         <Snowflake size={14} className="text-primary" />
-                        <span className="text-[10px] font-bold font-mono text-on-surface-variant uppercase">ICE CLASS: {route.iceClass}</span>
+                        <span className="text-[10px] font-bold font-mono text-on-surface-variant uppercase">{t("iceClass")}: {route.iceClass}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Navigation size={14} className="text-primary" />
@@ -202,7 +204,7 @@ export function SavedRoutes({ onSwitchToFleet }: SavedRoutesProps) {
                       </div>
                       <div className="ml-auto">
                         <button className="py-2 px-6 bg-secondary text-background font-bold font-mono text-[10px] tracking-widest hover:bg-secondary-dim transition-colors flex items-center gap-2 shadow-lg shadow-secondary/10">
-                          REPLAY ROUTE <ChevronRight size={14} />
+                          {t("replayRoute")} <ChevronRight size={14} />
                         </button>
                       </div>
                     </div>
@@ -221,7 +223,7 @@ export function SavedRoutes({ onSwitchToFleet }: SavedRoutesProps) {
           <div className="space-y-8">
             <div className="technical-card p-6 bg-surface-highest/10 border-outline/20">
               <div className="flex justify-between items-center mb-8 pb-4 border-b border-outline/10">
-                <h3 className="text-[11px] font-bold font-mono text-on-surface tracking-[0.3em] uppercase">SAVED VESSELS</h3>
+                <h3 className="text-[11px] font-bold font-mono text-on-surface tracking-[0.3em] uppercase">{t("savedVesselsTitle")}</h3>
                 <button className="text-primary hover:text-secondary transition-colors">
                   <PlusCircle size={20} />
                 </button>
@@ -244,11 +246,11 @@ export function SavedRoutes({ onSwitchToFleet }: SavedRoutesProps) {
                     
                     <div className="mt-4 grid grid-cols-2 gap-4">
                       <div>
-                        <p className="text-[8px] font-bold font-mono text-on-surface-variant uppercase tracking-wider mb-1">Hull Type</p>
+                        <p className="text-[8px] font-bold font-mono text-on-surface-variant uppercase tracking-wider mb-1">{t("hullType")}</p>
                         <p className="text-[10px] font-bold font-mono text-primary truncate">{vessel.hull}</p>
                       </div>
                       <div>
-                        <p className="text-[8px] font-bold font-mono text-on-surface-variant uppercase tracking-wider mb-1">Max Draft</p>
+                        <p className="text-[8px] font-bold font-mono text-on-surface-variant uppercase tracking-wider mb-1">{t("maxDraft")}</p>
                         <p className="text-[10px] font-bold font-mono text-primary">{vessel.draft}</p>
                       </div>
                     </div>
@@ -260,7 +262,7 @@ export function SavedRoutes({ onSwitchToFleet }: SavedRoutesProps) {
                 onClick={onSwitchToFleet}
                 className="w-full mt-8 py-3 border border-outline/30 border-dashed text-on-surface-variant font-bold font-mono text-[9px] tracking-[0.2em] hover:bg-surface-highest/30 transition-colors uppercase"
               >
-                MANAGE ALL VESSELS
+                {t("manageAllVessels")}
               </button>
             </div>
 
@@ -273,20 +275,20 @@ export function SavedRoutes({ onSwitchToFleet }: SavedRoutesProps) {
                 <div className="p-2 bg-primary/20 rounded">
                   <Activity size={20} className="text-primary" />
                 </div>
-                <h3 className="text-[11px] font-bold font-mono text-primary tracking-[0.3em] uppercase">ARCHIVE STATS</h3>
+                <h3 className="text-[11px] font-bold font-mono text-primary tracking-[0.3em] uppercase">{t("archiveStats")}</h3>
               </div>
               
               <div className="space-y-5 relative z-10">
                 <div className="flex justify-between items-center border-b border-primary/20 pb-2">
-                  <span className="text-xs font-semibold text-on-surface-variant tracking-tight font-body-md uppercase text-[10px]">Total Calculated</span>
+                  <span className="text-xs font-semibold text-on-surface-variant tracking-tight font-body-md uppercase text-[10px]">{t("totalCalculated")}</span>
                   <span className="text-lg font-bold font-mono text-primary">124</span>
                 </div>
                 <div className="flex justify-between items-center border-b border-primary/20 pb-2">
-                  <span className="text-xs font-semibold text-on-surface-variant tracking-tight font-body-md uppercase text-[10px]">Active Fleet</span>
+                  <span className="text-xs font-semibold text-on-surface-variant tracking-tight font-body-md uppercase text-[10px]">{t("activeFleet")}</span>
                   <span className="text-lg font-bold font-mono text-primary">12</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-xs font-semibold text-on-surface-variant tracking-tight font-body-md uppercase text-[10px]">Data Retention</span>
+                  <span className="text-xs font-semibold text-on-surface-variant tracking-tight font-body-md uppercase text-[10px]">{t("dataRetention")}</span>
                   <span className="text-lg font-bold font-mono text-primary">180D</span>
                 </div>
               </div>

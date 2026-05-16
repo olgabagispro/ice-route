@@ -107,6 +107,8 @@ interface MapNavigationTarget {
 interface LegAnalysis {
   from: string;
   to: string;
+  fromPoint?: GeoPoint;
+  toPoint?: GeoPoint;
   iceClass: string;
   thickness: string;
   risk: "LOW" | "MODERATE" | "HIGH";
@@ -138,6 +140,21 @@ interface OpenAIResponse {
   };
 }
 
+interface IceClassAIResponse {
+  legs: Array<{
+    iceClass: string;
+    thickness: string;
+    risk: "LOW" | "MODERATE" | "HIGH";
+    integrity: number;
+    demandingSegment: string;
+    advisories: Array<{
+      type: "ice" | "seasonal" | "warning";
+      title: string;
+      description: string;
+    }>;
+  }>;
+}
+
 type WidgetAction =
   | { type: "navigate"; lng: number; lat: number; zoom?: number }
   | { type: "add_waypoint"; lng: number; lat: number; name?: string };
@@ -147,11 +164,72 @@ const FURBOATS_WIDGET_SCRIPT_ID = "furboats-voice-widget-script";
 const FURBOATS_WIDGET_ELEMENT_ID = "furboats-voice-agent-widget";
 const FURBOATS_WIDGET_URL = "https://furboats-openai-live-dev.denslov.workers.dev/widget/v1/furboats-voice-widget.js";
 const FURBOATS_WIDGET_BACKEND_URL = "https://furboats-openai-live-dev.denslov.workers.dev";
+const ICE_ANALYSIS_SYSTEM_INSTRUCTION = "You are Ice Route AI, a polar maritime route analyst. Return conservative advisory ice-class estimates for each route leg. Use only the supplied route coordinates and dates. This is planning guidance, not an authoritative navigation order.";
 
 const SUPPORTED_WIDGET_ACTIONS = [
   "/action navigate lng,lat,zoom",
   "/action add_waypoint lng,lat,name",
 ] as const;
+
+const ICE_ANALYSIS_RESPONSE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["legs"],
+  properties: {
+    legs: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["iceClass", "thickness", "risk", "integrity", "demandingSegment", "advisories"],
+        properties: {
+          iceClass: {
+            type: "string",
+            description: "Recommended minimum ice class for this leg, for example Ice3, Arc4, Arc7, Arc9, or Open Water.",
+          },
+          thickness: {
+            type: "string",
+            description: "Estimated ice thickness label such as 0.4m, 1.2m, or Unknown.",
+          },
+          risk: {
+            type: "string",
+            enum: ["LOW", "MODERATE", "HIGH"],
+          },
+          integrity: {
+            type: "integer",
+            minimum: 0,
+            maximum: 100,
+            description: "Confidence/integrity score for this advisory estimate.",
+          },
+          demandingSegment: {
+            type: "string",
+            description: "Short description of the most demanding part of this leg.",
+          },
+          advisories: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["type", "title", "description"],
+              properties: {
+                type: {
+                  type: "string",
+                  enum: ["ice", "seasonal", "warning"],
+                },
+                title: {
+                  type: "string",
+                },
+                description: {
+                  type: "string",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
 
 function formatChatTranscript(messages: ChatMessage[]) {
   return messages
@@ -170,6 +248,116 @@ function getOpenAIResponseText(response: OpenAIResponse) {
     .filter(Boolean)
     .join("\n")
     .trim();
+}
+
+function parseOpenAIJson<T>(response: OpenAIResponse): T {
+  const text = getOpenAIResponseText(response);
+  if (!text) {
+    throw new Error("AI response did not include structured output.");
+  }
+
+  return JSON.parse(text) as T;
+}
+
+function buildIceAnalysisPrompt(waypoints: GeoPoint[], startDate: string, endDate: string) {
+  const legs = waypoints.slice(0, -1).map((from, index) => {
+    const to = waypoints[index + 1];
+    return {
+      index: index + 1,
+      from: {
+        name: from.name || `Waypoint ${index + 1}`,
+        lat: from.lat,
+        lng: from.lng,
+      },
+      to: {
+        name: to.name || `Waypoint ${index + 2}`,
+        lat: to.lat,
+        lng: to.lng,
+      },
+      distanceNm: calculateRouteDistance([from, to]),
+    };
+  });
+
+  return JSON.stringify({
+    task: "Estimate required ice class and route risk for every route leg.",
+    outputRules: [
+      "Return exactly one legs item for each input leg, in the same order.",
+      "Use concise maritime wording suitable for UI cards.",
+      "If public ice data is not available in this prompt, make a conservative planning estimate from latitude, season, and segment length.",
+    ],
+    navigationWindow: {
+      startDate: startDate || null,
+      endDate: endDate || null,
+    },
+    legs,
+  });
+}
+
+function getRouteSignature(waypoints: GeoPoint[]) {
+  return waypoints
+    .map((point) => `${point.lat.toFixed(5)},${point.lng.toFixed(5)}`)
+    .join("|");
+}
+
+async function requestIceClassAnalysis(waypoints: GeoPoint[], startDate: string, endDate: string): Promise<AnalysisResult> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OpenAI API key is not configured. Add OPENAI_API_KEY to .env.local and restart the dev server.");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+      instructions: ICE_ANALYSIS_SYSTEM_INSTRUCTION,
+      input: buildIceAnalysisPrompt(waypoints, startDate, endDate),
+      text: {
+        format: {
+          type: "json_schema",
+          name: "ice_route_analysis",
+          strict: true,
+          schema: ICE_ANALYSIS_RESPONSE_SCHEMA,
+        },
+      },
+    }),
+  });
+
+  const data = await response.json() as OpenAIResponse;
+  if (!response.ok) {
+    throw new Error(data.error?.message || "OpenAI ice-class analysis failed");
+  }
+
+  const parsed = parseOpenAIJson<IceClassAIResponse>(data);
+  const legs = waypoints.slice(0, -1).map((fromPoint, index): LegAnalysis => {
+    const toPoint = waypoints[index + 1];
+    const aiLeg = parsed.legs[index];
+
+    return {
+      from: fromPoint.name?.split(",")[0] || `Waypoint ${index + 1}`,
+      to: toPoint.name?.split(",")[0] || `Waypoint ${index + 2}`,
+      fromPoint,
+      toPoint,
+      iceClass: aiLeg?.iceClass || "Unknown",
+      thickness: aiLeg?.thickness || "Unknown",
+      risk: aiLeg?.risk || "MODERATE",
+      integrity: Math.max(0, Math.min(100, Number(aiLeg?.integrity ?? 50))),
+      distance: calculateRouteDistance([fromPoint, toPoint]),
+      demandingSegment: aiLeg?.demandingSegment || `Section ${index + 1}: ${fromPoint.name || "Waypoint"} to ${toPoint.name || "Waypoint"}`,
+      advisories: aiLeg?.advisories?.length ? aiLeg.advisories : [
+        {
+          type: "warning",
+          title: "Manual Review",
+          description: "AI response did not include advisories for this segment.",
+        },
+      ],
+    };
+  });
+
+  return { legs };
 }
 
 function isValidCoordinate(lat: number, lng: number) {
@@ -262,6 +450,41 @@ function calculateRouteDistance(pts: GeoPoint[]) {
     total += R * c;
   }
   return Math.round(total);
+}
+
+function buildWidgetRouteContext(waypoints: GeoPoint[], analysisResult: AnalysisResult | null) {
+  return {
+    waypointCount: waypoints.length,
+    totalDistanceNm: calculateRouteDistance(waypoints),
+    waypoints: waypoints.map(({ id, lat, lng, name }) => ({ id, lat, lng, name })),
+    analyzed: Boolean(analysisResult),
+    legs: waypoints.slice(0, -1).map((fromPoint, index) => {
+      const toPoint = waypoints[index + 1];
+      const analysis = analysisResult?.legs[index];
+      return {
+        index: index + 1,
+        from: {
+          id: fromPoint.id,
+          lat: fromPoint.lat,
+          lng: fromPoint.lng,
+          name: fromPoint.name,
+        },
+        to: {
+          id: toPoint.id,
+          lat: toPoint.lat,
+          lng: toPoint.lng,
+          name: toPoint.name,
+        },
+        distanceNm: calculateRouteDistance([fromPoint, toPoint]),
+        iceClass: analysis?.iceClass || null,
+        thickness: analysis?.thickness || null,
+        risk: analysis?.risk || null,
+        integrity: analysis?.integrity || null,
+        demandingSegment: analysis?.demandingSegment || null,
+        advisories: analysis?.advisories || [],
+      };
+    }),
+  };
 }
 
 function positionFurboatsWidget(widget: HTMLElement) {
@@ -385,6 +608,8 @@ export default function App() {
   const [flyToPoint, setFlyToPoint] = useState<MapNavigationTarget | null>(null);
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [analysisRouteSignature, setAnalysisRouteSignature] = useState<string | null>(null);
 
   const sendWidgetCommand = useCallback((command: string, payload: Record<string, unknown>) => {
     const widget = document.getElementById(FURBOATS_WIDGET_ELEMENT_ID);
@@ -423,6 +648,15 @@ export default function App() {
     setFlyToPoint({ ...waypoint, zoom: 8 });
     setActiveTab("command");
   }, []);
+
+  const runIceAnalysis = useCallback(async () => {
+    const routeSignature = getRouteSignature(waypoints);
+    const result = await requestIceClassAnalysis(waypoints, startDate, endDate);
+    setAnalysisResult(result);
+    setAnalysisRouteSignature(routeSignature);
+    setShowAnalysis(true);
+    sendWidgetCommand("ice_class.updated", buildWidgetRouteContext(waypoints, result));
+  }, [endDate, sendWidgetCommand, startDate, waypoints]);
 
   useEffect(() => {
     let cancelled = false;
@@ -512,12 +746,10 @@ export default function App() {
 
     previousWaypointCountRef.current = waypoints.length;
 
-    sendWidgetCommand("route.updated", {
-      waypointCount: waypoints.length,
-      totalDistanceNm: calculateRouteDistance(waypoints),
-      waypoints: waypoints.map(({ id, lat, lng, name }) => ({ id, lat, lng, name })),
-    });
-  }, [sendWidgetCommand, waypoints]);
+    const currentRouteSignature = getRouteSignature(waypoints);
+    const currentAnalysis = analysisRouteSignature === currentRouteSignature ? analysisResult : null;
+    sendWidgetCommand("route.updated", buildWidgetRouteContext(waypoints, currentAnalysis));
+  }, [analysisResult, analysisRouteSignature, sendWidgetCommand, waypoints]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -538,21 +770,6 @@ export default function App() {
   const [mapLayer, setMapLayer] = useState<"satellite" | "standard">("standard");
   const [showLayers, setShowLayers] = useState(false);
   const [showIceLayers, setShowIceLayers] = useState(false);
-
-  // Mock analysis result
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-
-  const calculateDistance = (p1: GeoPoint, p2: GeoPoint) => {
-    const R = 3440.065; // Earth radius in nautical miles
-    const dLat = (p2.lat - p1.lat) * Math.PI / 180;
-    const dLon = (p2.lng - p1.lng) * Math.PI / 180;
-    const a = 
-        Math.sin(dLat/2) * Math.sin(dLat/2) +
-        Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) * 
-        Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return Math.round(R * c);
-  };
 
   // Auto-scroll chat
   useEffect(() => {
@@ -609,6 +826,36 @@ export default function App() {
       setIsSidebarOpen(true);
     }
   }, [waypoints.length]);
+
+  useEffect(() => {
+    if (analysisRouteSignature && analysisRouteSignature !== getRouteSignature(waypoints)) {
+      setShowAnalysis(false);
+    }
+  }, [analysisRouteSignature, waypoints]);
+
+  useEffect(() => {
+    if (!analysisRouteSignature || waypoints.length < 2 || analysisRouteSignature === getRouteSignature(waypoints)) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      setIsAnalyzing(true);
+      try {
+        await runIceAnalysis();
+      } catch (error) {
+        console.error("Automatic ice class recalculation failed", error);
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: error instanceof Error ? error.message : "Automatic ice-class recalculation failed.",
+        }]);
+        setChatOpen(true);
+      } finally {
+        setIsAnalyzing(false);
+      }
+    }, 900);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [analysisRouteSignature, runIceAnalysis, waypoints]);
 
   const handleGeocode = async (query: string) => {
     if (!query) return;
@@ -736,38 +983,23 @@ export default function App() {
     alert("Mission Route Saved to Archive");
   };
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     if (waypoints.length < 2) return;
     setIsAnalyzing(true);
-    
-    // Simulate API call processing each leg
-    setTimeout(() => {
-      const legs: LegAnalysis[] = [];
-      for (let i = 0; i < waypoints.length - 1; i++) {
-        const p1 = waypoints[i];
-        const p2 = waypoints[i+1];
-        const dist = calculateDistance(p1, p2);
-        
-        legs.push({
-          from: p1.name?.split(',')[0] || "Waypoint " + i,
-          to: p2.name?.split(',')[0] || "Waypoint " + (i + 1),
-          iceClass: i % 2 === 0 ? "Ice3" : "Arc4",
-          thickness: i % 2 === 0 ? "1.2m" : "0.8m",
-          risk: dist > 500 ? "HIGH" : i % 2 === 1 ? "MODERATE" : "LOW",
-          integrity: 96 - (i * 3),
-          distance: dist,
-          demandingSegment: `Section ${i + 1}: ${p1.name?.split(',')[0]} to ${p2.name?.split(',')[0]}`,
-          advisories: [
-            { type: "ice", title: "Ice Compression", description: `Segment ${i+1} shows moderate drift patterns.` },
-            { type: "warning", title: "Thermal Shift", description: "Projected drop in ambient sea temperature." }
-          ]
-        });
-      }
-      
-      setAnalysisResult({ legs });
+    setShowAnalysis(false);
+
+    try {
+      await runIceAnalysis();
+    } catch (error) {
+      console.error("Ice class analysis failed", error);
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: error instanceof Error ? error.message : "Ice-class analysis failed. Check AI configuration and try again.",
+      }]);
+      setChatOpen(true);
+    } finally {
       setIsAnalyzing(false);
-      setShowAnalysis(true);
-    }, 1500);
+    }
   };
 
   const generateGeodeticPath = (p1: GeoPoint, p2: GeoPoint, segments = 50) => {

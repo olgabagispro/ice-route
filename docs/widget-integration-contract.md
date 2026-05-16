@@ -78,7 +78,14 @@ new CustomEvent("ice-route.command", {
 Supported commands:
 
 - `waypoint.added`: sent when a new waypoint is added. Payload contains `{ waypoint: { id, lat, lng, name } }`.
-- `route.updated`: sent whenever the waypoint list changes. Payload contains `{ waypointCount, totalDistanceNm, waypoints }`.
+- `route.updated`: sent whenever the waypoint list changes. Payload contains `{ waypointCount, totalDistanceNm, waypoints, analyzed, legs }`. When `analyzed` is `false`, leg ice-class fields are `null`.
+- `ice_class.updated`: sent after the host receives a fresh AI ice-class analysis. Payload contains route coordinates plus `legs[]` with `{ from, to, distanceNm, iceClass, thickness, risk, integrity, demandingSegment, advisories }`.
+
+Current host behavior:
+
+- The first ice-class analysis is initiated by the user from the host app after selecting at least two route points.
+- After a successful analysis, later route changes trigger a debounced recalculation.
+- The widget should treat `ice_class.updated` as the authoritative route context for voice answers. `route.updated` is a live route snapshot and may have `analyzed: false` while recalculation is pending.
 
 ## Widget Developer Tasks
 

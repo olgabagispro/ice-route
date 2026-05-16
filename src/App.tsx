@@ -131,6 +131,26 @@ interface AnalysisResult {
   legs: LegAnalysis[];
 }
 
+interface SeaRouteFeature {
+  type: "Feature";
+  geometry?: {
+    type: "LineString";
+    coordinates?: [number, number][];
+  };
+  properties?: {
+    length?: number;
+    units?: string;
+    duration_hours?: number;
+  };
+}
+
+interface SeaRouteLeg {
+  legIndex: number;
+  coordinates: [number, number][];
+  lengthKm?: number;
+  durationHours?: number;
+}
+
 interface OpenAIResponse {
   output_text?: string;
   output?: Array<{
@@ -173,6 +193,7 @@ const FURBOATS_WIDGET_SCRIPT_ID = "furboats-voice-widget-script";
 const FURBOATS_WIDGET_ELEMENT_ID = "furboats-voice-agent-widget";
 const FURBOATS_WIDGET_URL = "https://furboats-openai-live-dev.denslov.workers.dev/widget/v1/furboats-voice-widget.js";
 const FURBOATS_WIDGET_BACKEND_URL = "https://furboats-openai-live-dev.denslov.workers.dev";
+const SEA_ROUTE_API_URL = "https://usvmz35vpfuf3qaympixjlbfbe0dqian.lambda-url.eu-north-1.on.aws/route";
 const ICE_ANALYSIS_SYSTEM_INSTRUCTION = "You are Ice Route AI, a polar maritime route analyst. Return conservative advisory ice-class estimates for each route leg. Use only the supplied route coordinates and dates. This is planning guidance, not an authoritative navigation order.";
 
 const SUPPORTED_WIDGET_ACTIONS = [
@@ -312,6 +333,31 @@ function getRouteSignature(waypoints: GeoPoint[]) {
   return waypoints
     .map((point) => `${point.lat.toFixed(5)},${point.lng.toFixed(5)}`)
     .join("|");
+}
+
+async function requestSeaRoute(from: GeoPoint, to: GeoPoint, signal: AbortSignal): Promise<SeaRouteFeature> {
+  const response = await fetch(SEA_ROUTE_API_URL, {
+    method: "POST",
+    signal,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      origin: [from.lng, from.lat],
+      destination: [to.lng, to.lat],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Sea-route service failed with ${response.status}`);
+  }
+
+  const data = await response.json() as SeaRouteFeature;
+  if (data.geometry?.type !== "LineString" || !data.geometry.coordinates?.length) {
+    throw new Error("Sea-route service returned no LineString coordinates.");
+  }
+
+  return data;
 }
 
 async function requestIceClassAnalysis(waypoints: GeoPoint[], startDate: string, endDate: string): Promise<AnalysisResult> {
@@ -836,6 +882,9 @@ export default function App() {
   const [endDate, setEndDate] = useState<string>("");
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisRouteSignature, setAnalysisRouteSignature] = useState<string | null>(null);
+  const [seaRouteLegs, setSeaRouteLegs] = useState<SeaRouteLeg[]>([]);
+  const [isSeaRouting, setIsSeaRouting] = useState(false);
+  const [seaRouteError, setSeaRouteError] = useState<string | null>(null);
   const t = useCallback((key: TranslationKey) => dictionaries[language][key], [language]);
 
   const sendWidgetCommand = useCallback((command: string, payload: Record<string, unknown>) => {
@@ -977,6 +1026,58 @@ export default function App() {
       setShowAnalysis(false);
     }
   }, [analysisRouteSignature, waypoints]);
+
+  useEffect(() => {
+    if (waypoints.length < 2) {
+      setSeaRouteLegs([]);
+      setSeaRouteError(null);
+      setIsSeaRouting(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsSeaRouting(true);
+    setSeaRouteError(null);
+
+    const loadSeaRoutes = async () => {
+      const results = await Promise.allSettled(
+        waypoints.slice(0, -1).map(async (fromPoint, index) => {
+          const feature = await requestSeaRoute(fromPoint, waypoints[index + 1], controller.signal);
+          return {
+            legIndex: index,
+            coordinates: feature.geometry!.coordinates!,
+            lengthKm: feature.properties?.length,
+            durationHours: feature.properties?.duration_hours,
+          } satisfies SeaRouteLeg;
+        })
+      );
+
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      const loadedRoutes = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      const failedCount = results.length - loadedRoutes.length;
+      setSeaRouteLegs(loadedRoutes);
+      setSeaRouteError(failedCount ? `${failedCount} sea-route leg${failedCount === 1 ? "" : "s"} failed to load.` : null);
+      setIsSeaRouting(false);
+    };
+
+    void loadSeaRoutes().catch((error) => {
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      console.error("Sea-route loading failed", error);
+      setSeaRouteLegs([]);
+      setSeaRouteError(error instanceof Error ? error.message : "Sea-route loading failed.");
+      setIsSeaRouting(false);
+    });
+
+    return () => {
+      controller.abort();
+    };
+  }, [waypoints]);
 
   const handleGeocode = async (query: string) => {
     if (!query) return;
@@ -1790,6 +1891,16 @@ export default function App() {
                     weight={2}
                   />
                 ))}
+
+                {seaRouteLegs.map((route) => (
+                  <Polyline
+                    key={`sea-route-${route.legIndex}`}
+                    positions={route.coordinates.map(([lng, lat]) => [lat, lng] as [number, number])}
+                    color="#fd8b00"
+                    opacity={0.95}
+                    weight={3}
+                  />
+                ))}
               </MapContainer>
             </div>
 
@@ -1797,6 +1908,14 @@ export default function App() {
             <Legend showIceClasses={showIceLayers} t={t} />
 
             <div className="absolute bottom-6 left-6 z-30 hidden md:block">
+              {(isSeaRouting || seaRouteError) && (
+                <p className={cn(
+                  "mb-2 text-[9px] font-mono uppercase tracking-[0.2em] max-w-[300px] leading-relaxed",
+                  seaRouteError ? "text-error" : "text-secondary"
+                )}>
+                  {seaRouteError || "SEA ROUTE LOADING..."}
+                </p>
+              )}
               <p className="text-[9px] font-mono text-outline uppercase tracking-[0.2em] max-w-[300px] leading-relaxed opacity-60">
                  {t("caution")}
               </p>
@@ -2022,6 +2141,10 @@ const Legend = ({ showIceClasses, t }: { showIceClasses?: boolean; t: (key: Tran
         <div className="flex items-center gap-2">
           <div className="w-4 h-[1px] border-t border-dashed border-primary" />
           <span className="text-[10px] font-mono text-on-surface tracking-tighter">{t("plannedRoute")}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-[2px] bg-secondary" />
+          <span className="text-[10px] font-mono text-on-surface tracking-tighter">{t("maritimeRoute")}</span>
         </div>
       </div>
     </div>

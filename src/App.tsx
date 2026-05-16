@@ -7,7 +7,6 @@ import {
   Bell, 
   User, 
   Route, 
-  Brain, 
   Activity, 
   History,
   Ship,
@@ -28,14 +27,11 @@ import {
   Download,
   Menu,
   X,
-  Send,
   Loader2,
   Plus,
   Minus,
   GripVertical,
   Trash2,
-  Mic,
-  MicOff,
   MapPin
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -69,7 +65,6 @@ import { SavedRoutes } from "./components/SavedRoutes";
 import { SavedVessels, type Vessel } from "./components/SavedVessels";
 import { VesselDetail } from "./components/VesselDetail";
 import { DateRangePicker } from "./components/DateRangePicker";
-import { AIIcon } from "./components/AIIcon";
 
 /**
  * Utility for Tailwind class merging
@@ -122,11 +117,6 @@ interface AnalysisResult {
   legs: LegAnalysis[];
 }
 
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
 interface OpenAIResponse {
   output_text?: string;
   output?: Array<{
@@ -160,10 +150,11 @@ type WidgetAction =
   | { type: "add_waypoint"; lng: number; lat: number; name?: string }
   | { type: "insert_waypoint"; lng: number; lat: number; afterLeg: number; name?: string }
   | { type: "delete_leg"; leg: number }
+  | { type: "set_navigation_period"; startDate: string; endDate: string }
+  | { type: "get_navigation_period" }
   | { type: "calculate_route" }
   | { type: "generate_report" };
 
-const AI_SYSTEM_INSTRUCTION = "You are 'Ice Route AI', a specialized advisor for polar corridor navigation. You provide technical feedback on ice classes (Ice1-Ice3, Arc4-Arc9), sea states, and maritime security. Keep responses concise, professional, and slightly technical.";
 const FURBOATS_WIDGET_SCRIPT_ID = "furboats-voice-widget-script";
 const FURBOATS_WIDGET_ELEMENT_ID = "furboats-voice-agent-widget";
 const FURBOATS_WIDGET_URL = "https://furboats-openai-live-dev.denslov.workers.dev/widget/v1/furboats-voice-widget.js";
@@ -175,6 +166,8 @@ const SUPPORTED_WIDGET_ACTIONS = [
   "/action add_waypoint lng,lat,name",
   "/action insert_waypoint lng,lat,after_leg,name",
   "/action delete_leg leg_number",
+  "/action set_navigation_period start_date,end_date",
+  "/action get_navigation_period",
   "/action calculate_route",
   "/action generate_report",
 ] as const;
@@ -239,12 +232,6 @@ const ICE_ANALYSIS_RESPONSE_SCHEMA = {
   },
 } as const;
 
-function formatChatTranscript(messages: ChatMessage[]) {
-  return messages
-    .map((message) => `${message.role === "assistant" ? "Assistant" : "User"}: ${message.content}`)
-    .join("\n");
-}
-
 function getOpenAIResponseText(response: OpenAIResponse) {
   if (response.output_text) {
     return response.output_text;
@@ -287,18 +274,24 @@ function buildIceAnalysisPrompt(waypoints: GeoPoint[], startDate: string, endDat
   });
 
   return JSON.stringify({
-    task: "Estimate required ice class and route risk for every route leg.",
+    task: "Estimate the worst expected ice load, required ice class, and route risk for every route leg across the supplied navigation period.",
     outputRules: [
       "Return exactly one legs item for each input leg, in the same order.",
       "Use concise maritime wording suitable for UI cards.",
-      "If public ice data is not available in this prompt, make a conservative planning estimate from latitude, season, and segment length.",
+      "The navigation period is mandatory. Use it as a primary factor because worst-case ice load depends strongly on season.",
+      "Estimate the worst expected ice condition within the entire startDate-to-endDate interval, not an average condition.",
+      "If public ice data is not available in this prompt, make a conservative planning estimate from latitude, season, navigation period, and segment length.",
     ],
     navigationWindow: {
-      startDate: startDate || null,
-      endDate: endDate || null,
+      startDate,
+      endDate,
     },
     legs,
   });
+}
+
+function hasNavigationPeriod(startDate: string, endDate: string) {
+  return Boolean(startDate && endDate);
 }
 
 function getRouteSignature(waypoints: GeoPoint[]) {
@@ -311,6 +304,10 @@ async function requestIceClassAnalysis(waypoints: GeoPoint[], startDate: string,
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OpenAI API key is not configured. Add OPENAI_API_KEY to .env.local and restart the dev server.");
+  }
+
+  if (!hasNavigationPeriod(startDate, endDate)) {
+    throw new Error("Navigation period is required for ice-load calculation.");
   }
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -388,8 +385,17 @@ function parseWidgetActionText(text: string): WidgetAction | null {
     return { type: "generate_report" };
   }
 
+  if (actionName === "get_navigation_period") {
+    return { type: "get_navigation_period" };
+  }
+
   if (!rawArgs) {
     return null;
+  }
+
+  if (actionName === "set_navigation_period") {
+    const [startDate, endDate] = rawArgs.split(",").map((part) => part.trim());
+    return startDate && endDate ? { type: "set_navigation_period", startDate, endDate } : null;
   }
 
   if (actionName === "delete_leg") {
@@ -448,6 +454,20 @@ function parseWidgetActionDetail(detail: any): WidgetAction | null {
 
   if (action === "generate_report") {
     return { type: "generate_report" };
+  }
+
+  if (action === "get_navigation_period") {
+    return { type: "get_navigation_period" };
+  }
+
+  if (action === "set_navigation_period") {
+    const startDate = params?.startDate ?? params?.start_date ?? params?.from;
+    const endDate = params?.endDate ?? params?.end_date ?? params?.to;
+    return startDate && endDate ? {
+      type: "set_navigation_period",
+      startDate,
+      endDate,
+    } : null;
   }
 
   if (action === "delete_leg") {
@@ -513,11 +533,12 @@ function calculateRouteDistance(pts: GeoPoint[]) {
   return Math.round(total);
 }
 
-function buildWidgetRouteContext(waypoints: GeoPoint[], analysisResult: AnalysisResult | null) {
+function buildWidgetRouteContext(waypoints: GeoPoint[], analysisResult: AnalysisResult | null, startDate = "", endDate = "") {
   return {
     waypointCount: waypoints.length,
     totalDistanceNm: calculateRouteDistance(waypoints),
     waypoints: waypoints.map(({ id, lat, lng, name }) => ({ id, lat, lng, name })),
+    navigationPeriod: buildNavigationPeriodPayload(startDate, endDate),
     analyzed: Boolean(analysisResult),
     legs: waypoints.slice(0, -1).map((fromPoint, index) => {
       const toPoint = waypoints[index + 1];
@@ -545,6 +566,14 @@ function buildWidgetRouteContext(waypoints: GeoPoint[], analysisResult: Analysis
         advisories: analysis?.advisories || [],
       };
     }),
+  };
+}
+
+function buildNavigationPeriodPayload(startDate: string, endDate: string) {
+  return {
+    startDate: startDate || null,
+    endDate: endDate || null,
+    complete: hasNavigationPeriod(startDate, endDate),
   };
 }
 
@@ -780,17 +809,8 @@ export default function App() {
   const [selectedVessel, setSelectedVessel] = useState<Vessel | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(true);
-  const [chatOpen, setChatOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "I am an expert in Arctic navigation. How can I assist with your trajectory today?" }
-  ]);
-  const [input, setInput] = useState("");
-  const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [hoveredWaypointId, setHoveredWaypointId] = useState<string | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const recognitionRef = useRef<any>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
   const previousWaypointCountRef = useRef(0);
 
   // Geocoding states
@@ -815,13 +835,24 @@ export default function App() {
     window.dispatchEvent(new CustomEvent("ice-route.command", { detail }));
   }, []);
 
+  const requestNavigationPeriodFromWidget = useCallback((reason: string) => {
+    const payload = {
+      reason,
+      message: "Navigation period is required before calculating ice load. Please ask the user for a start and end date, then send set_navigation_period.",
+      currentPeriod: buildNavigationPeriodPayload(startDate, endDate),
+    };
+
+    sendWidgetCommand("navigation_period.required", payload);
+    alert("Please enter the navigation period before calculating the route, or provide it through the voice assistant.");
+  }, [endDate, sendWidgetCommand, startDate]);
+
   const runIceAnalysis = useCallback(async () => {
     const routeSignature = getRouteSignature(waypoints);
     const result = await requestIceClassAnalysis(waypoints, startDate, endDate);
     setAnalysisResult(result);
     setAnalysisRouteSignature(routeSignature);
     setShowAnalysis(true);
-    sendWidgetCommand("ice_class.updated", buildWidgetRouteContext(waypoints, result));
+    sendWidgetCommand("ice_class.updated", buildWidgetRouteContext(waypoints, result, startDate, endDate));
   }, [endDate, sendWidgetCommand, startDate, waypoints]);
 
   useEffect(() => {
@@ -885,8 +916,8 @@ export default function App() {
 
     const currentRouteSignature = getRouteSignature(waypoints);
     const currentAnalysis = analysisRouteSignature === currentRouteSignature ? analysisResult : null;
-    sendWidgetCommand("route.updated", buildWidgetRouteContext(waypoints, currentAnalysis));
-  }, [analysisResult, analysisRouteSignature, sendWidgetCommand, waypoints]);
+    sendWidgetCommand("route.updated", buildWidgetRouteContext(waypoints, currentAnalysis, startDate, endDate));
+  }, [analysisResult, analysisRouteSignature, endDate, sendWidgetCommand, startDate, waypoints]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -907,55 +938,6 @@ export default function App() {
   const [mapLayer, setMapLayer] = useState<"satellite" | "standard">("standard");
   const [showLayers, setShowLayers] = useState(false);
   const [showIceLayers, setShowIceLayers] = useState(false);
-
-  // Auto-scroll chat
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  // Speech Recognition Setup
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = true;
-      
-      // Try to determine language from browser or default to en-US
-      // The user is Russian, so we could try to support multiple, but let's stick to browser default or en/ru
-      recognitionRef.current.lang = navigator.language || 'en-US';
-
-      recognitionRef.current.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((result: any) => result[0].transcript)
-          .join('');
-        setInput(transcript);
-      };
-
-      recognitionRef.current.onerror = (event: any) => {
-        console.error('Speech recognition error', event.error);
-        setIsRecording(false);
-      };
-
-      recognitionRef.current.onend = () => {
-        setIsRecording(false);
-      };
-    }
-  }, []);
-
-  const toggleRecording = () => {
-    if (!recognitionRef.current) {
-      alert("Speech recognition is not supported in this browser.");
-      return;
-    }
-
-    if (isRecording) {
-      recognitionRef.current.stop();
-    } else {
-      setIsRecording(true);
-      recognitionRef.current.start();
-    }
-  };
 
   // Auto-open sidebar when points are selected
   useEffect(() => {
@@ -1022,8 +1004,21 @@ export default function App() {
     setWaypoints(prev => prev.filter(p => p.id !== id));
   };
 
+  const handleNavigationPeriodChange = useCallback((start: string, end: string) => {
+    setStartDate(start);
+    setEndDate(end);
+    sendWidgetCommand("navigation_period.updated", {
+      navigationPeriod: buildNavigationPeriodPayload(start, end),
+    });
+  }, [sendWidgetCommand]);
+
   const handleAnalyze = useCallback(async () => {
     if (waypoints.length < 2) return;
+    if (!hasNavigationPeriod(startDate, endDate)) {
+      requestNavigationPeriodFromWidget("calculate_route");
+      return;
+    }
+
     setIsAnalyzing(true);
     setShowAnalysis(false);
 
@@ -1031,15 +1026,13 @@ export default function App() {
       await runIceAnalysis();
     } catch (error) {
       console.error("Ice class analysis failed", error);
-      setMessages(prev => [...prev, {
-        role: "assistant",
-        content: error instanceof Error ? error.message : "Ice-class analysis failed. Check AI configuration and try again.",
-      }]);
-      setChatOpen(true);
+      const message = error instanceof Error ? error.message : "Ice-class analysis failed. Check AI configuration and try again.";
+      sendWidgetCommand("ice_class.failed", { reason: message });
+      alert(message);
     } finally {
       setIsAnalyzing(false);
     }
-  }, [runIceAnalysis, waypoints.length]);
+  }, [endDate, requestNavigationPeriodFromWidget, runIceAnalysis, sendWidgetCommand, startDate, waypoints.length]);
 
   const handleGenerateFullReport = useCallback(() => {
     if (!analysisResult) {
@@ -1121,8 +1114,22 @@ export default function App() {
       return;
     }
 
+    if (action.type === "set_navigation_period") {
+      handleNavigationPeriodChange(action.startDate, action.endDate);
+      return;
+    }
+
+    if (action.type === "get_navigation_period") {
+      sendWidgetCommand("navigation_period.current", {
+        navigationPeriod: buildNavigationPeriodPayload(startDate, endDate),
+      });
+      return;
+    }
+
     if (action.type === "calculate_route") {
-      if (waypoints.length >= 2 && !isAnalyzing) {
+      if (!hasNavigationPeriod(startDate, endDate)) {
+        requestNavigationPeriodFromWidget("calculate_route");
+      } else if (waypoints.length >= 2 && !isAnalyzing) {
         void handleAnalyze();
       } else {
         sendWidgetCommand("calculate_route.rejected", {
@@ -1135,7 +1142,7 @@ export default function App() {
     if (action.type === "generate_report") {
       handleGenerateFullReport();
     }
-  }, [handleAnalyze, handleGenerateFullReport, isAnalyzing, sendWidgetCommand, waypoints]);
+  }, [endDate, handleAnalyze, handleGenerateFullReport, handleNavigationPeriodChange, isAnalyzing, requestNavigationPeriodFromWidget, sendWidgetCommand, startDate, waypoints]);
 
   useEffect(() => {
     const handleWidgetText = (event: Event) => {
@@ -1174,48 +1181,6 @@ export default function App() {
         const newIndex = items.findIndex(i => i.id === over.id);
         return arrayMove(items, oldIndex, newIndex);
       });
-    }
-  };
-
-  const handleChat = async () => {
-    if (!input.trim() || isLoadingChat) return;
-    const userMsg: ChatMessage = { role: "user", content: input };
-    setMessages(prev => [...prev, userMsg]);
-    setInput("");
-    setIsLoadingChat(true);
-
-    try {
-      const apiKey = process.env.OPENAI_API_KEY;
-      if (!apiKey) {
-        setMessages(prev => [...prev, { role: "assistant", content: "OpenAI API key is not configured. Add OPENAI_API_KEY to .env.local and restart the dev server." }]);
-        return;
-      }
-
-      const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
-          instructions: AI_SYSTEM_INSTRUCTION,
-          input: formatChatTranscript([...messages, userMsg]),
-        }),
-      });
-
-      const data = await response.json() as OpenAIResponse;
-      if (!response.ok) {
-        throw new Error(data.error?.message || "OpenAI request failed");
-      }
-
-      const content = getOpenAIResponseText(data) || "I'm having trouble retrieving data from the satellite. Please try again.";
-      setMessages(prev => [...prev, { role: "assistant", content }]);
-    } catch (error) {
-      console.error("AI failed", error);
-      setMessages(prev => [...prev, { role: "assistant", content: "Communication blackout. Check your satellite connection." }]);
-    } finally {
-      setIsLoadingChat(false);
     }
   };
 
@@ -1412,17 +1377,18 @@ export default function App() {
                           <Route size={16} className="text-primary" />
                           <h3 className="text-xs font-bold font-mono tracking-widest text-on-surface-variant">MISSION PARAMETERS</h3>
                         </div>
-                        {waypoints.length > 0 && (
-                          <button 
-                            onClick={() => {
+	                        {waypoints.length > 0 && (
+	                          <button 
+	                            onClick={() => {
                               setWaypoints([]);
                               setNewWaypointSearch("");
-                              setStartDate("");
-                              setEndDate("");
+                              handleNavigationPeriodChange("", "");
+                              setAnalysisResult(null);
+                              setAnalysisRouteSignature(null);
                               setShowAnalysis(false);
                             }}
-                            className="text-[10px] font-mono text-error hover:text-error/80 flex items-center gap-1 transition-colors"
-                          >
+	                            className="text-[10px] font-mono text-error hover:text-error/80 flex items-center gap-1 transition-colors"
+	                          >
                             <X size={12} />
                             RESET MISSION
                           </button>
@@ -1498,10 +1464,7 @@ export default function App() {
                           <DateRangePicker 
                             startDate={startDate} 
                             endDate={endDate} 
-                            onRangeChange={(start, end) => {
-                              setStartDate(start);
-                              setEndDate(end);
-                            }} 
+                            onRangeChange={handleNavigationPeriodChange}
                           />
                         </div>
                       </div>
@@ -1770,120 +1733,6 @@ export default function App() {
 
             {/* Map Legend */}
             <Legend showIceClasses={showIceLayers} />
-
-            {/* AI Advisor Modal */}
-            <AnimatePresence>
-              {chatOpen && (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.9, x: 20, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, x: 0, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.9, x: 20, y: 20 }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="absolute bottom-28 right-6 w-[320px] md:w-[400px] z-[60]"
-                >
-                  <div className="technical-card glass-panel shadow-2xl flex flex-col h-[500px]">
-                    <TechnicalBorder />
-                    <div className="p-4 border-b border-outline/20 flex justify-between items-center bg-surface-highest/50">
-                      <div className="flex items-center gap-2">
-                        <div className="relative">
-                          <Brain size={18} className="text-tertiary" />
-                          <span className="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full animate-pulse" />
-                        </div>
-                        <span className="text-xs font-bold font-mono tracking-widest">ICE ROUTE ADVISOR</span>
-                      </div>
-                      <button onClick={() => setChatOpen(false)} className="text-on-surface-variant hover:text-on-surface">
-                        <X size={18} />
-                      </button>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-background/20">
-                      {messages.map((m, i) => (
-                        <div key={i} className={cn(
-                          "flex flex-col gap-1 max-w-[85%]",
-                          m.role === "user" ? "ml-auto items-end" : "mr-auto items-start"
-                        )}>
-                          <span className="text-[10px] font-mono text-outline uppercase">{m.role}</span>
-                          <div className={cn(
-                            "p-3 text-[11px] leading-relaxed border",
-                            m.role === "user" 
-                              ? "bg-primary/10 border-primary/30 text-on-surface rounded-l-lg rounded-tr-lg" 
-                              : "bg-surface-highest/30 border-outline/30 text-on-surface rounded-r-lg rounded-tl-lg"
-                          )}>
-                            {m.content}
-                          </div>
-                        </div>
-                      ))}
-                      {isLoadingChat && (
-                        <div className="flex gap-1 mr-auto items-start max-w-[85%]">
-                          <div className="p-3 bg-surface-highest/30 border border-outline/30 rounded-r-lg rounded-tl-lg">
-                            <div className="flex gap-1">
-                              <span className="w-1 h-1 bg-primary rounded-full animate-bounce" />
-                              <span className="w-1 h-1 bg-primary rounded-full animate-bounce delay-100" />
-                              <span className="w-1 h-1 bg-primary rounded-full animate-bounce delay-200" />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      <div ref={chatEndRef} />
-                    </div>
-
-                    <div className="p-4 border-t border-outline/20">
-                      <div className="relative group">
-                        <input 
-                          type="text" 
-                          value={input}
-                          onChange={(e) => setInput(e.target.value)}
-                          onKeyDown={(e) => e.key === "Enter" && handleChat()}
-                          placeholder={isRecording ? "Listening..." : "Inquire about polar navigation..."}
-                          className={cn(
-                            "w-full bg-background/50 border border-outline/30 p-3 pr-24 text-[11px] font-mono focus:border-primary focus:ring-0 outline-none placeholder:text-outline transition-all",
-                            isRecording && "border-secondary ring-1 ring-secondary/20"
-                          )}
-                        />
-                        <div className="absolute right-2 top-2 flex items-center gap-1">
-                          <button 
-                            onClick={toggleRecording}
-                            className={cn(
-                              "p-1.5 transition-colors",
-                              isRecording ? "text-secondary animate-pulse" : "text-outline hover:text-primary"
-                            )}
-                            title={isRecording ? "Stop Recording" : "Voice Input"}
-                          >
-                            {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
-                          </button>
-                          <button 
-                            onClick={handleChat}
-                            disabled={isLoadingChat || (!input.trim() && !isRecording)}
-                            className="p-1.5 text-primary hover:text-primary-dim disabled:opacity-50"
-                          >
-                            <Send size={16} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-      <div className="absolute bottom-24 md:bottom-12 right-6 z-50">
-        <button 
-          onClick={(e) => {
-            e.stopPropagation();
-            setChatOpen(!chatOpen);
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          className={cn(
-            "w-16 h-16 technical-card border-tertiary flex items-center justify-center group active:scale-95 transition-all shadow-2xl relative",
-            chatOpen && "bg-surface-highest"
-          )}
-        >
-          <div className="absolute inset-0 bg-tertiary/5 animate-pulse" />
-          <AIIcon className={cn(chatOpen ? "text-tertiary" : "text-primary group-hover:text-tertiary")} size={32} />
-          <div className="absolute -top-1 -left-1 w-2 h-2 border-t-2 border-l-2 border-tertiary/50" />
-          <div className="absolute -bottom-1 -right-1 w-2 h-2 border-b-2 border-r-2 border-tertiary/50" />
-        </button>
-      </div>
 
             <div className="absolute bottom-6 left-6 z-30 hidden md:block">
               <p className="text-[9px] font-mono text-outline uppercase tracking-[0.2em] max-w-[300px] leading-relaxed opacity-60">

@@ -96,6 +96,14 @@ interface GeoPoint {
   name?: string;
 }
 
+interface MapNavigationTarget {
+  id: string;
+  lat: number;
+  lng: number;
+  zoom?: number;
+  name?: string;
+}
+
 interface LegAnalysis {
   from: string;
   to: string;
@@ -130,11 +138,20 @@ interface OpenAIResponse {
   };
 }
 
+type WidgetAction =
+  | { type: "navigate"; lng: number; lat: number; zoom?: number }
+  | { type: "add_waypoint"; lng: number; lat: number; name?: string };
+
 const AI_SYSTEM_INSTRUCTION = "You are 'Ice Route AI', a specialized advisor for polar corridor navigation. You provide technical feedback on ice classes (Ice1-Ice3, Arc4-Arc9), sea states, and maritime security. Keep responses concise, professional, and slightly technical.";
 const FURBOATS_WIDGET_SCRIPT_ID = "furboats-voice-widget-script";
 const FURBOATS_WIDGET_ELEMENT_ID = "furboats-voice-agent-widget";
 const FURBOATS_WIDGET_URL = "https://furboats-openai-live-dev.denslov.workers.dev/widget/v1/furboats-voice-widget.js";
 const FURBOATS_WIDGET_BACKEND_URL = "https://furboats-openai-live-dev.denslov.workers.dev";
+
+const SUPPORTED_WIDGET_ACTIONS = [
+  "/action navigate lng,lat,zoom",
+  "/action add_waypoint lng,lat,name",
+] as const;
 
 function formatChatTranscript(messages: ChatMessage[]) {
   return messages
@@ -153,6 +170,98 @@ function getOpenAIResponseText(response: OpenAIResponse) {
     .filter(Boolean)
     .join("\n")
     .trim();
+}
+
+function isValidCoordinate(lat: number, lng: number) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+function parseWidgetActionText(text: string): WidgetAction | null {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^\/action\s+([a-z_]+)\s+(.+)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const [, actionName, rawArgs] = match;
+  const [rawLng, rawLat, rawThird, ...rest] = rawArgs.split(",").map((part) => part.trim());
+  const lng = Number(rawLng);
+  const lat = Number(rawLat);
+
+  if (!isValidCoordinate(lat, lng)) {
+    return null;
+  }
+
+  if (actionName === "navigate") {
+    const zoom = rawThird ? Number(rawThird) : undefined;
+    return {
+      type: "navigate",
+      lng,
+      lat,
+      zoom: Number.isFinite(zoom) ? Math.max(2, Math.min(18, zoom as number)) : undefined,
+    };
+  }
+
+  if (actionName === "add_waypoint") {
+    return {
+      type: "add_waypoint",
+      lng,
+      lat,
+      name: [rawThird, ...rest].filter(Boolean).join(", ") || undefined,
+    };
+  }
+
+  return null;
+}
+
+function parseWidgetActionDetail(detail: any): WidgetAction | null {
+  const action = detail?.action || detail?.type;
+  const params = detail?.params || detail;
+  const lng = Number(params?.lng ?? params?.lon ?? params?.longitude);
+  const lat = Number(params?.lat ?? params?.latitude);
+
+  if (!isValidCoordinate(lat, lng)) {
+    return null;
+  }
+
+  if (action === "navigate") {
+    const zoom = Number(params?.zoom);
+    return {
+      type: "navigate",
+      lng,
+      lat,
+      zoom: Number.isFinite(zoom) ? Math.max(2, Math.min(18, zoom)) : undefined,
+    };
+  }
+
+  if (action === "add_waypoint") {
+    return {
+      type: "add_waypoint",
+      lng,
+      lat,
+      name: params?.name,
+    };
+  }
+
+  return null;
+}
+
+function calculateRouteDistance(pts: GeoPoint[]) {
+  let total = 0;
+  const R = 3440.065;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+    const dLon = (p2.lng - p1.lng) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    total += R * c;
+  }
+  return Math.round(total);
 }
 
 function positionFurboatsWidget(widget: HTMLElement) {
@@ -268,13 +377,52 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const previousWaypointCountRef = useRef(0);
 
   // Geocoding states
   const [newWaypointSearch, setNewWaypointSearch] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  const [flyToPoint, setFlyToPoint] = useState<GeoPoint | null>(null);
+  const [flyToPoint, setFlyToPoint] = useState<MapNavigationTarget | null>(null);
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+
+  const sendWidgetCommand = useCallback((command: string, payload: Record<string, unknown>) => {
+    const widget = document.getElementById(FURBOATS_WIDGET_ELEMENT_ID);
+    const detail = {
+      command,
+      payload,
+      source: "ice-route",
+      sentAt: new Date().toISOString(),
+    };
+
+    widget?.dispatchEvent(new CustomEvent("ice-route.command", { detail, bubbles: true, composed: true }));
+    window.dispatchEvent(new CustomEvent("ice-route.command", { detail }));
+  }, []);
+
+  const executeWidgetAction = useCallback((action: WidgetAction) => {
+    if (action.type === "navigate") {
+      setFlyToPoint({
+        id: `widget-navigation-${Date.now()}`,
+        lat: action.lat,
+        lng: action.lng,
+        zoom: action.zoom,
+        name: "Widget navigation target",
+      });
+      setActiveTab("command");
+      return;
+    }
+
+    const waypoint: GeoPoint = {
+      id: `widget-waypoint-${Date.now()}`,
+      lat: action.lat,
+      lng: action.lng,
+      name: action.name || `Widget waypoint ${action.lat.toFixed(4)}, ${action.lng.toFixed(4)}`,
+    };
+
+    setWaypoints(prev => [...prev, waypoint]);
+    setFlyToPoint({ ...waypoint, zoom: 8 });
+    setActiveTab("command");
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -319,6 +467,57 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const handleWidgetText = (event: Event) => {
+      const text = (event as CustomEvent<{ text?: string }>).detail?.text;
+      if (!text) {
+        return;
+      }
+
+      const action = parseWidgetActionText(text);
+      if (action) {
+        executeWidgetAction(action);
+      }
+    };
+
+    const handleWidgetAction = (event: Event) => {
+      const action = parseWidgetActionDetail((event as CustomEvent).detail);
+      if (action) {
+        executeWidgetAction(action);
+      }
+    };
+
+    window.addEventListener("assistant.text", handleWidgetText);
+    window.addEventListener("furboats.action", handleWidgetAction);
+
+    return () => {
+      window.removeEventListener("assistant.text", handleWidgetText);
+      window.removeEventListener("furboats.action", handleWidgetAction);
+    };
+  }, [executeWidgetAction]);
+
+  useEffect(() => {
+    if (waypoints.length > previousWaypointCountRef.current) {
+      const waypoint = waypoints[waypoints.length - 1];
+      sendWidgetCommand("waypoint.added", {
+        waypoint: {
+          id: waypoint.id,
+          lat: waypoint.lat,
+          lng: waypoint.lng,
+          name: waypoint.name,
+        },
+      });
+    }
+
+    previousWaypointCountRef.current = waypoints.length;
+
+    sendWidgetCommand("route.updated", {
+      waypointCount: waypoints.length,
+      totalDistanceNm: calculateRouteDistance(waypoints),
+      waypoints: waypoints.map(({ id, lat, lng, name }) => ({ id, lat, lng, name })),
+    });
+  }, [sendWidgetCommand, waypoints]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -515,21 +714,7 @@ export default function App() {
   };
 
   const calculateTotalDistance = (pts: GeoPoint[]) => {
-    let total = 0;
-    const R = 3440.065; // Earth radius in nautical miles
-    for (let i = 0; i < pts.length - 1; i++) {
-        const p1 = pts[i];
-        const p2 = pts[i+1];
-        const dLat = (p2.lat - p1.lat) * Math.PI / 180;
-        const dLon = (p2.lng - p1.lng) * Math.PI / 180;
-        const a = 
-            Math.sin(dLat/2) * Math.sin(dLat/2) +
-            Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) * 
-            Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        total += R * c;
-    }
-    return Math.round(total);
+    return calculateRouteDistance(pts);
   };
 
   const handleSaveRoute = () => {
@@ -1466,11 +1651,11 @@ const Legend = ({ showIceClasses }: { showIceClasses?: boolean }) => (
   </div>
 );
 
-function FlyToHandler({ point, onComplete }: { point: GeoPoint; onComplete: () => void }) {
+function FlyToHandler({ point, onComplete }: { point: MapNavigationTarget; onComplete: () => void }) {
   const map = useMap();
   useEffect(() => {
     if (point) {
-      map.flyTo([point.lat, point.lng], 8, { animate: true, duration: 1.5 });
+      map.flyTo([point.lat, point.lng], point.zoom || 8, { animate: true, duration: 1.5 });
       onComplete();
     }
   }, [point, map, onComplete]);

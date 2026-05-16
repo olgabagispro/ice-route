@@ -65,12 +65,26 @@ import { SavedRoutes } from "./components/SavedRoutes";
 import { SavedVessels, type Vessel } from "./components/SavedVessels";
 import { VesselDetail } from "./components/VesselDetail";
 import { DateRangePicker } from "./components/DateRangePicker";
+import { dictionaries, type Language, type TranslationKey } from "./i18n";
 
 /**
  * Utility for Tailwind class merging
  */
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+function getInitialLanguage(): Language {
+  if (typeof window === "undefined") {
+    return "en";
+  }
+
+  const savedLanguage = window.localStorage.getItem("ice-route-language");
+  if (savedLanguage === "ru" || savedLanguage === "en") {
+    return savedLanguage;
+  }
+
+  return window.navigator.language.toLowerCase().startsWith("ru") ? "ru" : "en";
 }
 
 // Fix Leaflet Default Icon issue
@@ -736,13 +750,13 @@ const TechnicalBorder = () => (
   </>
 );
 
-const MobileNav = ({ activeTab, setActiveTab }: { activeTab: string; setActiveTab: (s: string) => void }) => {
+const MobileNav = ({ activeTab, setActiveTab, t }: { activeTab: string; setActiveTab: (s: string) => void; t: (key: TranslationKey) => string }) => {
   const tabs = [
-    { id: "command", icon: Activity, label: "COMMAND" },
-    { id: "fleet", icon: Ship, label: "FLEET" },
-    { id: "routing", icon: Route, label: "ROUTING" },
-    { id: "data", icon: Info, label: "DATA" },
-    { id: "archive", icon: Bookmark, label: "SAVED" },
+    { id: "command", icon: Activity, label: t("command") },
+    { id: "fleet", icon: Ship, label: t("fleet") },
+    { id: "routing", icon: Route, label: t("missionRouting") },
+    { id: "data", icon: Info, label: t("technicalData") },
+    { id: "archive", icon: Bookmark, label: t("savedRoutes") },
   ];
 
   return (
@@ -809,6 +823,7 @@ export default function App() {
   const [selectedVessel, setSelectedVessel] = useState<Vessel | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(true);
+  const [language, setLanguage] = useState<Language>(getInitialLanguage);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [hoveredWaypointId, setHoveredWaypointId] = useState<string | null>(null);
   const previousWaypointCountRef = useRef(0);
@@ -821,6 +836,7 @@ export default function App() {
   const [endDate, setEndDate] = useState<string>("");
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisRouteSignature, setAnalysisRouteSignature] = useState<string | null>(null);
+  const t = useCallback((key: TranslationKey) => dictionaries[language][key], [language]);
 
   const sendWidgetCommand = useCallback((command: string, payload: Record<string, unknown>) => {
     const widget = document.getElementById(FURBOATS_WIDGET_ELEMENT_ID);
@@ -838,13 +854,13 @@ export default function App() {
   const requestNavigationPeriodFromWidget = useCallback((reason: string) => {
     const payload = {
       reason,
-      message: "Navigation period is required before calculating ice load. Please ask the user for a start and end date, then send set_navigation_period.",
+      message: t("navigationPeriodRequiredWidget"),
       currentPeriod: buildNavigationPeriodPayload(startDate, endDate),
     };
 
     sendWidgetCommand("navigation_period.required", payload);
-    alert("Please enter the navigation period before calculating the route, or provide it through the voice assistant.");
-  }, [endDate, sendWidgetCommand, startDate]);
+    alert(t("navigationPeriodRequiredAlert"));
+  }, [endDate, sendWidgetCommand, startDate, t]);
 
   const runIceAnalysis = useCallback(async () => {
     const routeSignature = getRouteSignature(waypoints);
@@ -869,7 +885,7 @@ export default function App() {
         backendUrl: FURBOATS_WIDGET_BACKEND_URL,
         siteKey: "pk_test_furboats_arc",
         agentId: "arc-yacht-advisor",
-        language: "en",
+        language,
       }) as HTMLElement | undefined;
 
       if (widget) {
@@ -888,7 +904,7 @@ export default function App() {
       script.src = FURBOATS_WIDGET_URL;
       script.dataset.siteKey = "pk_test_furboats_arc";
       script.dataset.agentId = "arc-yacht-advisor";
-      script.dataset.language = "en";
+      script.dataset.language = language;
       script.dataset.autoInit = "false";
       script.addEventListener("load", mountWidget);
       document.body.append(script);
@@ -897,7 +913,15 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [language]);
+
+  useEffect(() => {
+    localStorage.setItem("ice-route-language", language);
+    document.documentElement.lang = language;
+    const widget = document.getElementById(FURBOATS_WIDGET_ELEMENT_ID);
+    widget?.setAttribute("data-language", language);
+    sendWidgetCommand("language.updated", { language });
+  }, [language, sendWidgetCommand]);
 
   useEffect(() => {
     if (waypoints.length > previousWaypointCountRef.current) {
@@ -1026,18 +1050,18 @@ export default function App() {
       await runIceAnalysis();
     } catch (error) {
       console.error("Ice class analysis failed", error);
-      const message = error instanceof Error ? error.message : "Ice-class analysis failed. Check AI configuration and try again.";
+      const message = error instanceof Error ? error.message : t("iceClassFailed");
       sendWidgetCommand("ice_class.failed", { reason: message });
       alert(message);
     } finally {
       setIsAnalyzing(false);
     }
-  }, [endDate, requestNavigationPeriodFromWidget, runIceAnalysis, sendWidgetCommand, startDate, waypoints.length]);
+  }, [endDate, requestNavigationPeriodFromWidget, runIceAnalysis, sendWidgetCommand, startDate, t, waypoints.length]);
 
   const handleGenerateFullReport = useCallback(() => {
     if (!analysisResult) {
       sendWidgetCommand("report.unavailable", {
-        reason: "No current ICE class analysis is available. Calculate the route before generating a report.",
+        reason: t("reportUnavailable"),
       });
       return;
     }
@@ -1050,7 +1074,7 @@ export default function App() {
       filename: `ice-route-report-${datestamp}.pdf`,
       legCount: analysisResult.legs.length,
     });
-  }, [analysisResult, endDate, sendWidgetCommand, startDate, waypoints]);
+  }, [analysisResult, endDate, sendWidgetCommand, startDate, t, waypoints]);
 
   const executeWidgetAction = useCallback((action: WidgetAction) => {
     if (action.type === "navigate") {
@@ -1076,7 +1100,7 @@ export default function App() {
       if (action.type === "insert_waypoint") {
         if (waypoints.length < 2 || action.afterLeg < 1 || action.afterLeg >= waypoints.length) {
           sendWidgetCommand("insert_waypoint.rejected", {
-            reason: "Insert waypoint requires an existing leg number between route points.",
+            reason: t("insertWaypointRejected"),
             afterLeg: action.afterLeg,
             waypointCount: waypoints.length,
           });
@@ -1099,7 +1123,7 @@ export default function App() {
     if (action.type === "delete_leg") {
       if (waypoints.length < 2 || action.leg < 1 || action.leg >= waypoints.length) {
         sendWidgetCommand("delete_leg.rejected", {
-          reason: "Delete leg requires an existing leg number.",
+          reason: t("deleteLegRejected"),
           leg: action.leg,
           legCount: Math.max(0, waypoints.length - 1),
         });
@@ -1133,7 +1157,7 @@ export default function App() {
         void handleAnalyze();
       } else {
         sendWidgetCommand("calculate_route.rejected", {
-          reason: waypoints.length < 2 ? "At least two waypoints are required." : "Route calculation is already running.",
+          reason: waypoints.length < 2 ? t("atLeastTwoWaypoints") : t("calculationRunning"),
         });
       }
       return;
@@ -1142,7 +1166,7 @@ export default function App() {
     if (action.type === "generate_report") {
       handleGenerateFullReport();
     }
-  }, [endDate, handleAnalyze, handleGenerateFullReport, handleNavigationPeriodChange, isAnalyzing, requestNavigationPeriodFromWidget, sendWidgetCommand, startDate, waypoints]);
+  }, [endDate, handleAnalyze, handleGenerateFullReport, handleNavigationPeriodChange, isAnalyzing, requestNavigationPeriodFromWidget, sendWidgetCommand, startDate, t, waypoints]);
 
   useEffect(() => {
     const handleWidgetText = (event: Event) => {
@@ -1204,7 +1228,7 @@ export default function App() {
 
     const saved = JSON.parse(localStorage.getItem('saved_routes') || '[]');
     localStorage.setItem('saved_routes', JSON.stringify([newRoute, ...saved]));
-    alert("Mission Route Saved to Archive");
+    alert(t("missionRouteSaved"));
   };
 
   const generateGeodeticPath = (p1: GeoPoint, p2: GeoPoint, segments = 50) => {
@@ -1230,27 +1254,41 @@ export default function App() {
             <Menu size={24} />
           </button>
           <div className="flex items-baseline gap-2">
-            <h1 className="text-xl font-bold tracking-tighter text-on-surface">ICE ROUTE</h1>
-            <span className="text-[10px] font-mono text-tertiary px-1 border border-tertiary/30 tracking-widest hidden sm:inline">PRO version</span>
+            <h1 className="text-xl font-bold tracking-tighter text-on-surface">{t("appName")}</h1>
+            <span className="text-[10px] font-mono text-tertiary px-1 border border-tertiary/30 tracking-widest hidden sm:inline">{t("proVersion")}</span>
           </div>
         </div>
 
         <div className="hidden lg:flex items-center gap-4 font-mono text-[10px] tracking-widest text-on-surface-variant">
           <div className="flex flex-col items-end">
-            <span className="text-secondary font-bold">SIGNAL: OPTIMAL</span>
+            <span className="text-secondary font-bold">{t("signalOptimal")}</span>
             <span>78.2° N, 15.6° E</span>
           </div>
           <div className="h-8 w-[1px] bg-outline/20 mx-2" />
           <nav className="flex items-center gap-6 text-xs font-semibold">
-            <button onClick={() => setActiveTab("command")} className={cn("hover:text-primary transition-colors", activeTab === "command" && "text-primary border-b border-primary")}>COMMAND</button>
-            <button onClick={() => { setActiveTab("fleet"); setSelectedVessel(null); }} className={cn("hover:text-primary transition-colors", activeTab === "fleet" && "text-primary border-b border-primary")}>FLEET</button>
-            <button onClick={() => setActiveTab("routing")} className={cn("hover:text-primary transition-colors", activeTab === "routing" && "text-primary border-b border-primary")}>CHARTS</button>
-            <button onClick={() => setActiveTab("data")} className={cn("hover:text-primary transition-colors", activeTab === "data" && "text-primary border-b border-primary")}>ENVIRONMENTAL</button>
-            <button onClick={() => setActiveTab("archive")} className={cn("hover:text-primary transition-colors", activeTab === "archive" && "text-primary border-b border-primary")}>SAVED ROUTES</button>
+            <button onClick={() => setActiveTab("command")} className={cn("hover:text-primary transition-colors", activeTab === "command" && "text-primary border-b border-primary")}>{t("command")}</button>
+            <button onClick={() => { setActiveTab("fleet"); setSelectedVessel(null); }} className={cn("hover:text-primary transition-colors", activeTab === "fleet" && "text-primary border-b border-primary")}>{t("fleet")}</button>
+            <button onClick={() => setActiveTab("routing")} className={cn("hover:text-primary transition-colors", activeTab === "routing" && "text-primary border-b border-primary")}>{t("charts")}</button>
+            <button onClick={() => setActiveTab("data")} className={cn("hover:text-primary transition-colors", activeTab === "data" && "text-primary border-b border-primary")}>{t("environmental")}</button>
+            <button onClick={() => setActiveTab("archive")} className={cn("hover:text-primary transition-colors", activeTab === "archive" && "text-primary border-b border-primary")}>{t("savedRoutes")}</button>
           </nav>
         </div>
 
         <div className="flex items-center gap-3">
+          <div className="flex border border-outline/20 bg-background/30 font-mono text-[10px] font-bold">
+            {(["en", "ru"] as const).map((option) => (
+              <button
+                key={option}
+                onClick={() => setLanguage(option)}
+                className={cn(
+                  "px-2 py-1 transition-colors uppercase",
+                  language === option ? "bg-primary text-background" : "text-on-surface-variant hover:text-primary"
+                )}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
           <button 
             onClick={() => setIsDarkMode(!isDarkMode)}
             className="p-2 text-on-surface-variant hover:text-primary rounded-full transition-colors"
@@ -1284,7 +1322,7 @@ export default function App() {
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-3">
                     <Activity size={20} className="text-primary" />
-                    <h2 className="text-lg font-semibold tracking-tight text-on-surface">Command Panel</h2>
+                    <h2 className="text-lg font-semibold tracking-tight text-on-surface">{t("commandPanel")}</h2>
                   </div>
                   <button 
                     className="md:hidden text-on-surface-variant"
@@ -1293,7 +1331,7 @@ export default function App() {
                     <X size={20} />
                   </button>
                 </div>
-                <p className="text-xs font-mono text-on-surface-variant uppercase tracking-widest">Vessel Alpha-7 | Polar Class Readiness</p>
+                <p className="text-xs font-mono text-on-surface-variant uppercase tracking-widest">{t("vesselReadiness")}</p>
               </div>
 
               <div className="flex-1 overflow-y-auto custom-scrollbar p-0 space-y-0 pb-32 md:pb-8">
@@ -1307,7 +1345,7 @@ export default function App() {
                     )}
                   >
                     <Activity size={18} />
-                    <span className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase">MISSION COMMAND</span>
+                    <span className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase">{t("missionCommand")}</span>
                   </button>
                   <button 
                     onClick={() => { setActiveTab("fleet"); setSelectedVessel(null); }}
@@ -1317,7 +1355,7 @@ export default function App() {
                     )}
                   >
                     <Ship size={18} />
-                    <span className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase">FLEET ARCHIVE</span>
+                    <span className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase">{t("fleetArchive")}</span>
                   </button>
                   <button 
                     onClick={() => setActiveTab("archive")}
@@ -1327,7 +1365,7 @@ export default function App() {
                     )}
                   >
                     <Bookmark size={18} />
-                    <span className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase">SAVED ROUTES</span>
+                    <span className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase">{t("savedRoutes")}</span>
                   </button>
                 </nav>
 
@@ -1348,12 +1386,12 @@ export default function App() {
                             {isAnalyzing ? (
                               <>
                                 <Loader2 size={16} className="animate-spin" />
-                                ANALYZING...
+                                {t("analyzing")}
                               </>
                             ) : (
                               <>
                                 <Activity size={16} />
-                                CALCULATE ICE CLASS
+                                {t("calculateIceClass")}
                               </>
                             )}
                           </button>
@@ -1367,7 +1405,7 @@ export default function App() {
                             )}
                           >
                             <Bookmark size={16} />
-                            SAVE MISSION ROUTE
+                            {t("saveMissionRoute")}
                           </button>
                         </div>
                       )}
@@ -1375,7 +1413,7 @@ export default function App() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Route size={16} className="text-primary" />
-                          <h3 className="text-xs font-bold font-mono tracking-widest text-on-surface-variant">MISSION PARAMETERS</h3>
+                          <h3 className="text-xs font-bold font-mono tracking-widest text-on-surface-variant">{t("missionParameters")}</h3>
                         </div>
 	                        {waypoints.length > 0 && (
 	                          <button 
@@ -1390,7 +1428,7 @@ export default function App() {
 	                            className="text-[10px] font-mono text-error hover:text-error/80 flex items-center gap-1 transition-colors"
 	                          >
                             <X size={12} />
-                            RESET MISSION
+                            {t("resetMission")}
                           </button>
                         )}
                       </div>
@@ -1400,7 +1438,7 @@ export default function App() {
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <MapPin size={12} className="text-outline" />
-                            <label className="text-[10px] font-bold font-mono text-on-surface-variant uppercase tracking-wider">ADD MISSION WAYPOINT</label>
+                            <label className="text-[10px] font-bold font-mono text-on-surface-variant uppercase tracking-wider">{t("addMissionWaypoint")}</label>
                           </div>
                           <div className="relative group">
                             <input 
@@ -1408,7 +1446,7 @@ export default function App() {
                               value={newWaypointSearch}
                               onChange={(e) => setNewWaypointSearch(e.target.value)}
                               onKeyDown={(e) => e.key === "Enter" && handleGeocode(newWaypointSearch)}
-                              placeholder="Search Port or Coordinates..."
+                              placeholder={t("waypointSearchPlaceholder")}
                               className="w-full bg-background/50 border border-outline/30 p-3 text-xs font-mono font-medium text-on-surface focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition-all placeholder:text-outline rounded-none text-[11px]"
                             />
                             <button 
@@ -1443,6 +1481,11 @@ export default function App() {
                                       isLast={index === waypoints.length - 1}
                                       isHovered={hoveredWaypointId === wp.id}
                                       onRemove={() => removeWaypoint(wp.id)}
+                                      labels={{
+                                        departure: t("departure"),
+                                        arrival: t("arrival"),
+                                        waypoint: t("waypoint"),
+                                      }}
                                     />
                                   </div>
                                 ))}
@@ -1452,19 +1495,26 @@ export default function App() {
 
                         {waypoints.length === 0 && (
                           <div className="p-4 border border-dashed border-outline/30 text-center">
-                            <p className="text-[10px] font-mono text-on-surface-variant uppercase">No waypoints defined. Click map to add legs.</p>
+                            <p className="text-[10px] font-mono text-on-surface-variant uppercase">{t("noWaypoints")}</p>
                           </div>
                         )}
 
                         <div className="pt-2 space-y-2">
                           <div className="flex items-center gap-2">
                             <Calendar size={12} className="text-outline" />
-                            <label className="text-[10px] font-bold font-mono text-on-surface-variant uppercase tracking-wider">NAVIGATION PERIOD</label>
+                            <label className="text-[10px] font-bold font-mono text-on-surface-variant uppercase tracking-wider">{t("navigationPeriod")}</label>
                           </div>
                           <DateRangePicker 
                             startDate={startDate} 
                             endDate={endDate} 
                             onRangeChange={handleNavigationPeriodChange}
+                            language={language}
+                            labels={{
+                              selectDateOrPeriod: t("selectDateOrPeriod"),
+                              selectDateOrPeriodUpper: t("selectDateOrPeriodUpper"),
+                              singleDate: t("singleDate"),
+                              period: t("period"),
+                            }}
                           />
                         </div>
                       </div>
@@ -1478,9 +1528,9 @@ export default function App() {
                       <div className="absolute right-0 top-0 p-2 opacity-10">
                         <Navigation size={48} className="-rotate-12 outline-none" />
                       </div>
-                      <h4 className="text-xs font-bold font-mono text-tertiary mb-2">NAVIGATION WINDOW</h4>
+                      <h4 className="text-xs font-bold font-mono text-tertiary mb-2">{t("navigationWindow")}</h4>
                       <p className="text-xs text-on-surface-variant leading-relaxed">
-                        Select two coordinates on the nautical chart or enter port names to initialize ice-class stratification intelligence.
+                        {t("navigationWindowHelp")}
                       </p>
                     </div>
                   )}
@@ -1496,8 +1546,8 @@ export default function App() {
                       className="space-y-4 overflow-hidden pt-4 pb-8"
                     >
                       <div className="flex items-center justify-between px-2 mb-2">
-                        <h2 className="text-[10px] font-bold font-mono text-primary tracking-[0.2em] uppercase">Route Intelligence</h2>
-                        <span className="text-[9px] font-mono text-outline">{analysisResult.legs.length} SEGMENTS</span>
+                        <h2 className="text-[10px] font-bold font-mono text-primary tracking-[0.2em] uppercase">{t("routeIntelligence")}</h2>
+                        <span className="text-[9px] font-mono text-outline">{analysisResult.legs.length} {t("segments")}</span>
                       </div>
 
                       {analysisResult.legs.map((leg, idx) => (
@@ -1507,22 +1557,22 @@ export default function App() {
                           <div className="flex justify-between items-start mb-3">
                             <div className="min-w-0 flex-1">
                               <p className="text-[9px] font-bold font-mono text-tertiary mb-1 tracking-tighter uppercase truncate">
-                                LEG {idx + 1}: {leg.from} → {leg.to}
+                                {t("leg")} {idx + 1}: {leg.from} → {leg.to}
                               </p>
                               <div className="flex items-baseline gap-2">
                                 <span className="text-2xl font-bold text-primary tracking-tighter">{leg.iceClass}</span>
-                                <span className="text-[8px] font-mono text-on-surface-variant">PC</span>
+                                <span className="text-[8px] font-mono text-on-surface-variant">{t("pc")}</span>
                               </div>
                             </div>
                             <div className="text-right">
-                              <div className="text-[8px] font-bold font-mono text-on-surface-variant">THICKNESS</div>
+                              <div className="text-[8px] font-bold font-mono text-on-surface-variant">{t("thickness")}</div>
                               <div className="text-lg font-mono text-secondary font-bold">{leg.thickness}</div>
                             </div>
                           </div>
 
                           <div className="grid grid-cols-2 gap-3 mb-3 pt-2 border-t border-outline/5">
                             <div className="space-y-1">
-                              <span className="text-[8px] font-bold font-mono text-on-surface-variant block uppercase">Risk</span>
+                              <span className="text-[8px] font-bold font-mono text-on-surface-variant block uppercase">{t("risk")}</span>
                               <div className="flex items-center gap-1.5">
                                 <div className={cn(
                                   "px-1.5 py-0.5 text-[8px] font-bold font-mono rounded-none",
@@ -1535,7 +1585,7 @@ export default function App() {
                               </div>
                             </div>
                             <div className="text-right space-y-1">
-                              <span className="text-[8px] font-bold font-mono text-on-surface-variant block uppercase">Dist.</span>
+                              <span className="text-[8px] font-bold font-mono text-on-surface-variant block uppercase">{t("distanceShort")}</span>
                               <span className="text-xs font-mono font-bold text-on-surface">{leg.distance} NM</span>
                             </div>
                           </div>
@@ -1557,7 +1607,7 @@ export default function App() {
 
                       <div className="technical-card p-4 rounded-none bg-primary/5 border-primary/20">
                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-[10px] font-bold font-mono text-on-surface-variant">TOTAL MISSION DISTANCE</span>
+                            <span className="text-[10px] font-bold font-mono text-on-surface-variant">{t("totalMissionDistance")}</span>
                             <span className="text-sm font-mono font-bold text-primary">{calculateTotalDistance(waypoints)} NM</span>
                          </div>
                          <button
@@ -1565,7 +1615,7 @@ export default function App() {
                             className="w-full py-2 bg-primary text-background text-[10px] font-bold font-mono tracking-widest hover:bg-primary-dim transition-colors uppercase flex items-center justify-center gap-2"
                          >
                             <Download size={14} />
-                            Generate Full Report
+                            {t("generateFullReport")}
                          </button>
                       </div>
                     </motion.div>
@@ -1575,8 +1625,8 @@ export default function App() {
             </div>
 
               <footer className="p-4 border-t border-outline/20 bg-background/50 flex flex-col items-center gap-1">
-                <p className="text-[9px] font-mono text-outline uppercase tracking-widest">INTERNAL MARITIME USE ONLY</p>
-                <p className="text-[8px] font-mono text-outline opacity-50">PROPRIETARY INTEL PROTOCOL 7.2</p>
+                <p className="text-[9px] font-mono text-outline uppercase tracking-widest">{t("internalUseOnly")}</p>
+                <p className="text-[8px] font-mono text-outline opacity-50">{t("proprietaryProtocol")}</p>
               </footer>
             </motion.aside>
           )}
@@ -1640,6 +1690,14 @@ export default function App() {
                   onCenter={() => waypoints.length > 0 && setFlyToPoint(waypoints[0])} 
                   onToggleLayers={() => setShowLayers(!showLayers)}
                   onToggleIceLayers={() => setShowIceLayers(!showIceLayers)}
+                  labels={{
+                    fullscreen: t("fullscreen"),
+                    layers: t("layers"),
+                    iceLayers: t("iceLayers"),
+                    centerOnVessel: t("centerOnVessel"),
+                    zoomIn: t("zoomIn"),
+                    zoomOut: t("zoomOut"),
+                  }}
                 />
 
                 <IceLayerManager 
@@ -1659,6 +1717,10 @@ export default function App() {
                       mapLayer={mapLayer} 
                       setMapLayer={setMapLayer} 
                       onClose={() => setShowLayers(false)} 
+                      labels={{
+                        satelliteLive: t("satelliteLive"),
+                        standardCharts: t("standardCharts"),
+                      }}
                     />
                   </div>
                 )}
@@ -1712,7 +1774,7 @@ export default function App() {
                         className="technical-tooltip"
                       >
                         <div className="px-2 py-1 bg-surface-highest border border-primary/50 text-[10px] font-mono font-bold text-primary uppercase tracking-widest">
-                          {index === 0 ? "DEPARTURE" : index === waypoints.length - 1 ? "ARRIVAL" : `WAYPOINT ${index}`}
+                          {index === 0 ? t("departureMap") : index === waypoints.length - 1 ? t("arrivalMap") : `${t("waypointMap")} ${index}`}
                         </div>
                       </Tooltip>
                     )}
@@ -1732,18 +1794,18 @@ export default function App() {
             </div>
 
             {/* Map Legend */}
-            <Legend showIceClasses={showIceLayers} />
+            <Legend showIceClasses={showIceLayers} t={t} />
 
             <div className="absolute bottom-6 left-6 z-30 hidden md:block">
               <p className="text-[9px] font-mono text-outline uppercase tracking-[0.2em] max-w-[300px] leading-relaxed opacity-60">
-                 Caution: Route simulations are advisory. Local ice observation remains mandatory for vessel safety. Intelligence Integrity: 99.8%.
+                 {t("caution")}
               </p>
             </div>
           </main>
         )}
       </div>
 
-      <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} />
+      <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} t={t} />
 
       {/* Global Mobile Menu Overlay */}
       <AnimatePresence>
@@ -1755,7 +1817,7 @@ export default function App() {
             className="fixed inset-0 z-[200] bg-background/90 backdrop-blur-xl md:hidden flex flex-col pt-16"
           >
             <div className="flex justify-between items-center px-6 h-16 border-b border-outline/10">
-              <span className="font-bold tracking-tighter text-on-surface">MAIN NAVIGATION</span>
+              <span className="font-bold tracking-tighter text-on-surface">{t("mainNavigation")}</span>
               <button 
                 onClick={() => setIsMobileMenuOpen(false)}
                 className="p-2 text-on-surface-variant"
@@ -1766,11 +1828,11 @@ export default function App() {
             
             <div className="flex-1 p-8 flex flex-col gap-6">
               {[
-                { id: "command", icon: Activity, label: "COMMAND & CONTROL" },
-                { id: "fleet", icon: Ship, label: "SAVED VESSELS" },
-                { id: "routing", icon: Route, label: "MISSION ROUTING" },
-                { id: "data", icon: Info, label: "TECHNICAL DATA" },
-                { id: "archive", icon: Bookmark, label: "SAVED ROUTES" },
+                { id: "command", icon: Activity, label: t("commandControl") },
+                { id: "fleet", icon: Ship, label: t("fleetArchive") },
+                { id: "routing", icon: Route, label: t("missionRouting") },
+                { id: "data", icon: Info, label: t("technicalData") },
+                { id: "archive", icon: Bookmark, label: t("savedRoutes") },
               ].map((item) => (
                 <button
                   key={item.id}
@@ -1787,7 +1849,7 @@ export default function App() {
                   <item.icon size={28} />
                   <div className="flex flex-col">
                     <span className="text-sm font-bold font-mono tracking-widest">{item.label}</span>
-                    <span className="text-[10px] opacity-50 uppercase font-mono">System Protocol Access</span>
+                    <span className="text-[10px] opacity-50 uppercase font-mono">{t("systemProtocolAccess")}</span>
                   </div>
                 </button>
               ))}
@@ -1795,8 +1857,8 @@ export default function App() {
 
             <div className="p-8 border-t border-outline/10 bg-surface-low">
               <div className="flex items-center justify-between text-xs font-mono text-outline">
-                 <span>VERSION 7.2.4</span>
-                 <span>POLAR OPS READY</span>
+                 <span>{t("version")}</span>
+                 <span>{t("polarOpsReady")}</span>
               </div>
             </div>
           </motion.div>
@@ -1811,12 +1873,17 @@ export default function App() {
 
 // --- Helper Components ---
 
-function SortableWaypointItem({ waypoint, index, isLast, isHovered, onRemove }: { 
+function SortableWaypointItem({ waypoint, index, isLast, isHovered, onRemove, labels }: { 
   waypoint: GeoPoint; 
   index: number; 
   isLast: boolean;
   isHovered?: boolean;
   onRemove: () => void;
+  labels?: {
+    departure: string;
+    arrival: string;
+    waypoint: string;
+  };
   key?: string | number;
 }) {
   const {
@@ -1859,7 +1926,7 @@ function SortableWaypointItem({ waypoint, index, isLast, isHovered, onRemove }: 
           "text-[10px] font-bold font-mono uppercase flex items-center gap-2 transition-colors",
           isHovered ? "text-primary" : "text-tertiary"
         )}>
-          {index === 0 ? "Departure" : isLast ? "Arrival" : `Waypoint ${index}`}
+          {index === 0 ? labels?.departure || "Departure" : isLast ? labels?.arrival || "Arrival" : `${labels?.waypoint || "Waypoint"} ${index}`}
         </p>
         <p className={cn(
           "text-[11px] font-mono truncate pr-2 transition-colors",
@@ -1882,10 +1949,14 @@ function SortableWaypointItem({ waypoint, index, isLast, isHovered, onRemove }: 
   );
 }
 
-function LayerPopup({ mapLayer, setMapLayer, onClose }: { 
+function LayerPopup({ mapLayer, setMapLayer, onClose, labels }: { 
   mapLayer: string; 
   setMapLayer: (l: any) => void; 
-  onClose: () => void 
+  onClose: () => void;
+  labels?: {
+    satelliteLive: string;
+    standardCharts: string;
+  };
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -1904,8 +1975,8 @@ function LayerPopup({ mapLayer, setMapLayer, onClose }: {
       className="leaflet-control technical-card glass-panel p-2 flex flex-col gap-1 min-w-[160px] shadow-2xl"
     >
       {[
-        { id: "satellite", label: "Satellite (Live)", icon: MapIcon },
-        { id: "standard", label: "Standard Charts", icon: Navigation }
+        { id: "satellite", label: labels?.satelliteLive || "Satellite (Live)", icon: MapIcon },
+        { id: "standard", label: labels?.standardCharts || "Standard Charts", icon: Navigation }
       ].map((layer) => (
         <button
           key={layer.id}
@@ -1927,7 +1998,7 @@ function LayerPopup({ mapLayer, setMapLayer, onClose }: {
   );
 }
 
-const Legend = ({ showIceClasses }: { showIceClasses?: boolean }) => (
+const Legend = ({ showIceClasses, t }: { showIceClasses?: boolean; t: (key: TranslationKey) => string }) => (
   <div 
     onMouseDown={(e) => e.stopPropagation()}
     className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#0c141c]/90 backdrop-blur-xl border border-outline/30 p-4 flex flex-col gap-4 items-center z-30 shadow-2xl rounded-none max-w-[95vw]"
@@ -1935,7 +2006,7 @@ const Legend = ({ showIceClasses }: { showIceClasses?: boolean }) => (
     <div className="flex flex-col md:flex-row gap-4 md:gap-8 items-start md:items-center">
       <div className="flex items-center gap-2 border-r border-outline/20 pr-4">
         <Shield size={14} className="text-secondary" />
-        <span className="text-[10px] font-bold font-mono text-on-surface uppercase tracking-widest whitespace-nowrap">Vessel Requirements</span>
+        <span className="text-[10px] font-bold font-mono text-on-surface uppercase tracking-widest whitespace-nowrap">{t("vesselRequirements")}</span>
       </div>
       
       <div className="grid grid-cols-2 md:flex items-center gap-4 md:gap-6">
@@ -1944,13 +2015,13 @@ const Legend = ({ showIceClasses }: { showIceClasses?: boolean }) => (
             <div className="w-3 h-3 border transition-transform group-hover:scale-110" style={{ backgroundColor: `${zone.color}33`, borderColor: zone.color }} />
             <div className="flex flex-col">
               <span className="text-[10px] font-bold font-mono text-on-surface tracking-tighter">{zone.id.split('-')[1].toUpperCase()}</span>
-              <span className="text-[8px] font-mono text-outline uppercase tracking-tight hidden md:block">REQUIRED</span>
+              <span className="text-[8px] font-mono text-outline uppercase tracking-tight hidden md:block">{t("required")}</span>
             </div>
           </div>
         ))}
         <div className="flex items-center gap-2">
           <div className="w-4 h-[1px] border-t border-dashed border-primary" />
-          <span className="text-[10px] font-mono text-on-surface tracking-tighter">PLANNED ROUTE</span>
+          <span className="text-[10px] font-mono text-on-surface tracking-tighter">{t("plannedRoute")}</span>
         </div>
       </div>
     </div>
@@ -1959,7 +2030,7 @@ const Legend = ({ showIceClasses }: { showIceClasses?: boolean }) => (
       <div className="flex flex-col md:flex-row gap-4 md:gap-8 items-start md:items-center pt-3 border-t border-outline/10 w-full justify-center">
         <div className="flex items-center gap-2 border-r border-outline/20 pr-4">
           <Snowflake size={14} className="text-primary" />
-          <span className="text-[10px] font-bold font-mono text-on-surface uppercase tracking-widest whitespace-nowrap">Sea Ice Data</span>
+          <span className="text-[10px] font-bold font-mono text-on-surface uppercase tracking-widest whitespace-nowrap">{t("seaIceData")}</span>
         </div>
         <div className="flex flex-wrap items-center gap-4 md:gap-6">
           {Object.entries(ICE_CLASS_COLORS).map(([id, color]) => (
@@ -1987,7 +2058,19 @@ function FlyToHandler({ point, onComplete }: { point: MapNavigationTarget; onCom
   return null;
 }
 
-function MapControls({ onCenter, onToggleLayers, onToggleIceLayers }: { onCenter: () => void, onToggleLayers: () => void, onToggleIceLayers: () => void }) {
+function MapControls({ onCenter, onToggleLayers, onToggleIceLayers, labels }: {
+  onCenter: () => void;
+  onToggleLayers: () => void;
+  onToggleIceLayers: () => void;
+  labels?: {
+    fullscreen: string;
+    layers: string;
+    iceLayers: string;
+    centerOnVessel: string;
+    zoomIn: string;
+    zoomOut: string;
+  };
+}) {
   const map = useMap();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -2002,18 +2085,18 @@ function MapControls({ onCenter, onToggleLayers, onToggleIceLayers }: { onCenter
     <div ref={containerRef} className="leaflet-top leaflet-right" style={{ marginTop: "24px", marginRight: "24px" }}>
       <div className="leaflet-control flex flex-col gap-3 pointer-events-auto">
         <div className="flex flex-col bg-surface border border-outline/20 shadow-2xl">
-          <button title="Fullscreen" className="p-3 text-on-surface hover:text-primary transition-colors border-b border-outline/20 focus:outline-none">
+          <button title={labels?.fullscreen || "Fullscreen"} className="p-3 text-on-surface hover:text-primary transition-colors border-b border-outline/20 focus:outline-none">
             <Maximize2 size={18} />
           </button>
           <button 
-            title="Layers" 
+            title={labels?.layers || "Layers"}
             onClick={onToggleLayers}
             className="p-3 text-on-surface hover:text-primary transition-colors border-b border-outline/20 focus:outline-none"
           >
             <Layers size={18} />
           </button>
           <button 
-            title="Ice Layers" 
+            title={labels?.iceLayers || "Ice Layers"}
             onClick={onToggleIceLayers}
             className="p-3 text-on-surface hover:text-primary transition-colors focus:outline-none"
           >
@@ -2022,7 +2105,7 @@ function MapControls({ onCenter, onToggleLayers, onToggleIceLayers }: { onCenter
         </div>
         
         <button 
-          title="Center on Vessel"
+          title={labels?.centerOnVessel || "Center on Vessel"}
           onClick={onCenter}
           className="bg-surface border border-outline/20 p-3 text-on-surface hover:text-primary hover:border-primary shadow-2xl transition-all active:scale-90 flex items-center justify-center"
         >
@@ -2030,10 +2113,10 @@ function MapControls({ onCenter, onToggleLayers, onToggleIceLayers }: { onCenter
         </button>
 
         <div className="flex flex-col bg-surface border border-outline/20 shadow-2xl">
-          <button title="Zoom In" onClick={() => map.zoomIn()} className="p-3 text-on-surface hover:text-primary transition-colors border-b border-outline/20 focus:outline-none flex items-center justify-center">
+          <button title={labels?.zoomIn || "Zoom In"} onClick={() => map.zoomIn()} className="p-3 text-on-surface hover:text-primary transition-colors border-b border-outline/20 focus:outline-none flex items-center justify-center">
             <Plus size={18} />
           </button>
-          <button title="Zoom Out" onClick={() => map.zoomOut()} className="p-3 text-on-surface hover:text-primary transition-colors focus:outline-none flex items-center justify-center">
+          <button title={labels?.zoomOut || "Zoom Out"} onClick={() => map.zoomOut()} className="p-3 text-on-surface hover:text-primary transition-colors focus:outline-none flex items-center justify-center">
             <Minus size={18} />
           </button>
         </div>

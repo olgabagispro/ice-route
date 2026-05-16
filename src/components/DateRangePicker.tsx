@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { format } from 'date-fns';
+import { enUS, ru } from 'date-fns/locale';
 import { Calendar as CalendarIcon, X, ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
 import { DayPicker, DateRange } from 'react-day-picker';
 import { motion, AnimatePresence } from 'motion/react';
@@ -9,9 +10,16 @@ interface DateRangePickerProps {
   startDate: string;
   endDate: string;
   onRangeChange: (start: string, end: string) => void;
+  language?: 'en' | 'ru';
+  labels?: {
+    selectDateOrPeriod: string;
+    selectDateOrPeriodUpper: string;
+    singleDate: string;
+    period: string;
+  };
 }
 
-export function DateRangePicker({ startDate, endDate, onRangeChange }: DateRangePickerProps) {
+export function DateRangePicker({ startDate, endDate, onRangeChange, language = 'en', labels }: DateRangePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [pickerMode, setPickerMode] = useState<'single' | 'range'>(endDate ? 'range' : 'single');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -23,6 +31,7 @@ export function DateRangePicker({ startDate, endDate, onRangeChange }: DateRange
   };
 
   const selectedDate: Date | undefined = startDate ? new Date(startDate) : undefined;
+  const dateLocale = language === 'ru' ? ru : enUS;
 
   const handleSelectRange = (range: DateRange | undefined) => {
     if (range) {
@@ -67,11 +76,11 @@ export function DateRangePicker({ startDate, endDate, onRangeChange }: DateRange
 
   const displayValue = () => {
     if (startDate && endDate) {
-      return `${format(new Date(startDate), 'dd MMM yyyy')} — ${format(new Date(endDate), 'dd MMM yyyy')}`;
+      return `${format(new Date(startDate), 'dd MMM yyyy', { locale: dateLocale })} — ${format(new Date(endDate), 'dd MMM yyyy', { locale: dateLocale })}`;
     } else if (startDate) {
-      return format(new Date(startDate), 'dd MMM yyyy');
+      return format(new Date(startDate), 'dd MMM yyyy', { locale: dateLocale });
     }
-    return 'Select date or period...';
+    return labels?.selectDateOrPeriod || 'Select date or period...';
   };
 
   return (
@@ -89,7 +98,7 @@ export function DateRangePicker({ startDate, endDate, onRangeChange }: DateRange
           {startDate ? (
             <span className="truncate">{displayValue()}</span>
           ) : (
-            <span className="truncate text-outline text-[11px] font-medium">Select Date or Period...</span>
+            <span className="truncate text-outline text-[11px] font-medium">{labels?.selectDateOrPeriodUpper || 'Select Date or Period...'}</span>
           )}
           <div className="flex items-center gap-2 shrink-0">
             {startDate && (
@@ -131,7 +140,7 @@ export function DateRangePicker({ startDate, endDate, onRangeChange }: DateRange
                     : "text-on-surface-variant hover:text-on-surface hover:bg-surface-highest/50"
                 )}
               >
-                SINGLE DATE
+                {labels?.singleDate || 'SINGLE DATE'}
               </button>
               <button
                 onClick={() => setPickerMode('range')}
@@ -143,7 +152,7 @@ export function DateRangePicker({ startDate, endDate, onRangeChange }: DateRange
                 )}
               >
                 {pickerMode === 'range' && <ArrowRight size={10} />}
-                PERIOD
+                {labels?.period || 'PERIOD'}
               </button>
             </div>
 
@@ -164,6 +173,7 @@ export function DateRangePicker({ startDate, endDate, onRangeChange }: DateRange
                 mode={pickerMode as any}
                 selected={(pickerMode === 'range' ? selectedRange : selectedDate) as any}
                 onSelect={(pickerMode === 'range' ? handleSelectRange : handleSelectSingle) as any}
+                locale={dateLocale}
                 showOutsideDays
                 className="p-0"
                 classNames={{

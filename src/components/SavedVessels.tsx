@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useState } from "react";
+import type { Translate } from "../i18n";
 
 export interface Vessel {
   id: string;
@@ -69,9 +70,10 @@ export const INITIAL_VESSELS: Vessel[] = [
 
 interface SavedVesselsProps {
   onSelectVessel: (vessel: Vessel) => void;
+  t: Translate;
 }
 
-export function SavedVessels({ onSelectVessel }: SavedVesselsProps) {
+export function SavedVessels({ onSelectVessel, t }: SavedVesselsProps) {
   const [searchTerm, setSearchTerm] = useState("");
 
   return (
@@ -80,14 +82,14 @@ export function SavedVessels({ onSelectVessel }: SavedVesselsProps) {
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
           <div className="space-y-2">
-            <p className="text-[10px] font-bold font-mono text-primary tracking-[0.3em] uppercase">FLEET COMMAND</p>
-            <h2 className="text-4xl md:text-5xl font-bold text-on-surface uppercase tracking-tighter">Saved Vessels</h2>
+            <p className="text-[10px] font-bold font-mono text-primary tracking-[0.3em] uppercase">{t("fleetCommand")}</p>
+            <h2 className="text-4xl md:text-5xl font-bold text-on-surface uppercase tracking-tighter">{t("savedVesselsTitle")}</h2>
             <p className="text-sm md:text-base text-on-surface-variant max-w-xl font-medium leading-relaxed">
-              Technical parameters and certification archive for ice-capable vessels within the Arctic sector.
+              {t("savedVesselsDescription")}
             </p>
           </div>
           <button className="px-8 py-3 bg-secondary text-background font-bold font-mono text-[10px] tracking-widest hover:bg-secondary-dim transition-all flex items-center gap-2 shadow-lg shadow-secondary/10">
-            <PlusCircle size={16} /> REGISTER NEW VESSEL
+            <PlusCircle size={16} /> {t("registerNewVessel")}
           </button>
         </div>
 
@@ -97,7 +99,7 @@ export function SavedVessels({ onSelectVessel }: SavedVesselsProps) {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-outline" size={18} />
             <input 
               type="text" 
-              placeholder="Search by vessel name, ID, or ice class..."
+              placeholder={t("vesselSearchPlaceholder")}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-surface-highest/10 border border-outline/20 p-4 pl-12 text-sm font-mono focus:border-primary focus:ring-0 outline-none placeholder:text-outline/50"
@@ -134,7 +136,7 @@ export function SavedVessels({ onSelectVessel }: SavedVesselsProps) {
                 />
                 <div className="absolute inset-0 bg-primary/20 group-hover:bg-transparent transition-colors" />
                 <div className="absolute top-4 left-4 px-2 py-1 bg-surface/80 backdrop-blur-md border border-outline/20 text-[9px] font-bold font-mono text-secondary tracking-widest uppercase">
-                  {vessel.iceClass} RATING
+                  {vessel.iceClass} {t("rating")}
                 </div>
               </div>
               
@@ -149,18 +151,18 @@ export function SavedVessels({ onSelectVessel }: SavedVesselsProps) {
 
                 <div className="grid grid-cols-2 gap-4 pt-4 border-t border-outline/10">
                   <div>
-                    <p className="text-[8px] font-bold font-mono text-on-surface-variant uppercase tracking-wider mb-1">Gross Tonnage</p>
+                    <p className="text-[8px] font-bold font-mono text-on-surface-variant uppercase tracking-wider mb-1">{t("grossTonnage")}</p>
                     <p className="text-sm font-bold font-mono text-primary">{vessel.gt} MT</p>
                   </div>
                   <div>
-                    <p className="text-[8px] font-bold font-mono text-on-surface-variant uppercase tracking-wider mb-1">Sea Draft</p>
+                    <p className="text-[8px] font-bold font-mono text-on-surface-variant uppercase tracking-wider mb-1">{t("seaDraft")}</p>
                     <p className="text-sm font-bold font-mono text-primary">{vessel.draft}</p>
                   </div>
                 </div>
 
                 <div className="mt-6">
                    <button className="w-full py-2 bg-surface-highest/20 hover:bg-surface-highest/40 text-[10px] font-bold font-mono tracking-[0.2em] uppercase transition-colors flex items-center justify-center gap-2">
-                    VIEW SPECIFICATIONS <ChevronRight size={14} />
+                    {t("viewSpecifications")} <ChevronRight size={14} />
                   </button>
                 </div>
               </div>

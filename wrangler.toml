@@ -1,6 +1,6 @@
 name = "ice-route"
 compatibility_date = "2026-05-16"
-main = "dist/_worker.js"
+main = "worker/index.js"
 workers_dev = true
 
 [assets]

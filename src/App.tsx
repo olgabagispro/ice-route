@@ -157,7 +157,11 @@ interface IceClassAIResponse {
 
 type WidgetAction =
   | { type: "navigate"; lng: number; lat: number; zoom?: number }
-  | { type: "add_waypoint"; lng: number; lat: number; name?: string };
+  | { type: "add_waypoint"; lng: number; lat: number; name?: string }
+  | { type: "insert_waypoint"; lng: number; lat: number; afterLeg: number; name?: string }
+  | { type: "delete_leg"; leg: number }
+  | { type: "calculate_route" }
+  | { type: "generate_report" };
 
 const AI_SYSTEM_INSTRUCTION = "You are 'Ice Route AI', a specialized advisor for polar corridor navigation. You provide technical feedback on ice classes (Ice1-Ice3, Arc4-Arc9), sea states, and maritime security. Keep responses concise, professional, and slightly technical.";
 const FURBOATS_WIDGET_SCRIPT_ID = "furboats-voice-widget-script";
@@ -169,6 +173,10 @@ const ICE_ANALYSIS_SYSTEM_INSTRUCTION = "You are Ice Route AI, a polar maritime 
 const SUPPORTED_WIDGET_ACTIONS = [
   "/action navigate lng,lat,zoom",
   "/action add_waypoint lng,lat,name",
+  "/action insert_waypoint lng,lat,after_leg,name",
+  "/action delete_leg leg_number",
+  "/action calculate_route",
+  "/action generate_report",
 ] as const;
 
 const ICE_ANALYSIS_RESPONSE_SCHEMA = {
@@ -366,12 +374,29 @@ function isValidCoordinate(lat: number, lng: number) {
 
 function parseWidgetActionText(text: string): WidgetAction | null {
   const trimmed = text.trim();
-  const match = trimmed.match(/^\/action\s+([a-z_]+)\s+(.+)$/i);
+  const match = trimmed.match(/^\/action\s+([a-z_]+)(?:\s+(.+))?$/i);
   if (!match) {
     return null;
   }
 
   const [, actionName, rawArgs] = match;
+  if (actionName === "calculate_route") {
+    return { type: "calculate_route" };
+  }
+
+  if (actionName === "generate_report") {
+    return { type: "generate_report" };
+  }
+
+  if (!rawArgs) {
+    return null;
+  }
+
+  if (actionName === "delete_leg") {
+    const leg = Number(rawArgs.trim());
+    return Number.isInteger(leg) && leg >= 1 ? { type: "delete_leg", leg } : null;
+  }
+
   const [rawLng, rawLat, rawThird, ...rest] = rawArgs.split(",").map((part) => part.trim());
   const lng = Number(rawLng);
   const lat = Number(rawLat);
@@ -399,12 +424,37 @@ function parseWidgetActionText(text: string): WidgetAction | null {
     };
   }
 
+  if (actionName === "insert_waypoint") {
+    const afterLeg = Number(rawThird);
+    return Number.isInteger(afterLeg) && afterLeg >= 1 ? {
+      type: "insert_waypoint",
+      lng,
+      lat,
+      afterLeg,
+      name: rest.filter(Boolean).join(", ") || undefined,
+    } : null;
+  }
+
   return null;
 }
 
 function parseWidgetActionDetail(detail: any): WidgetAction | null {
   const action = detail?.action || detail?.type;
   const params = detail?.params || detail;
+
+  if (action === "calculate_route") {
+    return { type: "calculate_route" };
+  }
+
+  if (action === "generate_report") {
+    return { type: "generate_report" };
+  }
+
+  if (action === "delete_leg") {
+    const leg = Number(params?.leg ?? params?.legNumber ?? params?.index);
+    return Number.isInteger(leg) && leg >= 1 ? { type: "delete_leg", leg } : null;
+  }
+
   const lng = Number(params?.lng ?? params?.lon ?? params?.longitude);
   const lat = Number(params?.lat ?? params?.latitude);
 
@@ -429,6 +479,17 @@ function parseWidgetActionDetail(detail: any): WidgetAction | null {
       lat,
       name: params?.name,
     };
+  }
+
+  if (action === "insert_waypoint") {
+    const afterLeg = Number(params?.afterLeg ?? params?.after_leg ?? params?.betweenLeg ?? params?.leg);
+    return Number.isInteger(afterLeg) && afterLeg >= 1 ? {
+      type: "insert_waypoint",
+      lng,
+      lat,
+      afterLeg,
+      name: params?.name,
+    } : null;
   }
 
   return null;
@@ -485,6 +546,136 @@ function buildWidgetRouteContext(waypoints: GeoPoint[], analysisResult: Analysis
       };
     }),
   };
+}
+
+function normalizePdfText(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escapePdfText(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function wrapPdfText(value: string, maxLength: number) {
+  const words = normalizePdfText(value).split(" ").filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+
+  words.forEach((word) => {
+    if (!current) {
+      current = word;
+      return;
+    }
+
+    if (`${current} ${word}`.length > maxLength) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = `${current} ${word}`;
+    }
+  });
+
+  if (current) {
+    lines.push(current);
+  }
+
+  return lines.length ? lines : [""];
+}
+
+function formatCoordinate(point?: GeoPoint) {
+  if (!point) {
+    return "n/a";
+  }
+
+  return `${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`;
+}
+
+function buildReportLines(waypoints: GeoPoint[], analysisResult: AnalysisResult, startDate: string, endDate: string) {
+  const lines: string[] = [
+    "ICE ROUTE FULL REPORT",
+    `Generated: ${new Date().toLocaleString("en-GB")}`,
+    `Navigation window: ${startDate || "not set"}${endDate ? ` to ${endDate}` : ""}`,
+    `Waypoints: ${waypoints.length} | Legs: ${analysisResult.legs.length} | Total distance: ${calculateRouteDistance(waypoints)} NM`,
+    "",
+    "LEG | FROM -> TO | COORDINATES | DIST NM | ICE CLASS | THICKNESS | RISK | INTEGRITY",
+    "----|------------|-------------|---------|-----------|-----------|------|----------",
+  ];
+
+  analysisResult.legs.forEach((leg, index) => {
+    const routeLabel = `${normalizePdfText(leg.from)} -> ${normalizePdfText(leg.to)}`;
+    const coordinates = `${formatCoordinate(leg.fromPoint)} -> ${formatCoordinate(leg.toPoint)}`;
+    lines.push(`${index + 1} | ${routeLabel} | ${coordinates} | ${leg.distance} | ${leg.iceClass} | ${leg.thickness} | ${leg.risk} | ${leg.integrity}%`);
+    lines.push(`    Demanding segment: ${normalizePdfText(leg.demandingSegment)}`);
+    leg.advisories.forEach((advisory) => {
+      lines.push(`    ${advisory.type.toUpperCase()}: ${normalizePdfText(advisory.title)} - ${normalizePdfText(advisory.description)}`);
+    });
+    lines.push("");
+  });
+
+  return lines.flatMap((line) => wrapPdfText(line, 104));
+}
+
+function createPdfBlob(lines: string[]) {
+  const pageLineLimit = 46;
+  const pages: string[][] = [];
+  for (let i = 0; i < lines.length; i += pageLineLimit) {
+    pages.push(lines.slice(i, i + pageLineLimit));
+  }
+
+  const objects: string[] = [];
+  objects.push("<< /Type /Catalog /Pages 2 0 R >>");
+
+  const pageObjectStart = 4;
+  const pageRefs = pages.map((_, index) => `${pageObjectStart + index * 2} 0 R`).join(" ");
+  objects.push(`<< /Type /Pages /Kids [${pageRefs}] /Count ${pages.length} >>`);
+  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>");
+
+  pages.forEach((pageLines, pageIndex) => {
+    const pageObjectNumber = pageObjectStart + pageIndex * 2;
+    const contentObjectNumber = pageObjectNumber + 1;
+    const stream = [
+      "BT",
+      "/F1 9 Tf",
+      "12 TL",
+      ...pageLines.map((line, index) => `1 0 0 1 36 ${780 - index * 14} Tm (${escapePdfText(line)}) Tj`),
+      "ET",
+    ].join("\n");
+
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObjectNumber} 0 R >>`);
+    objects.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+  });
+
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [0];
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  return new Blob([pdf], { type: "application/pdf" });
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function positionFurboatsWidget(widget: HTMLElement) {
@@ -624,31 +815,6 @@ export default function App() {
     window.dispatchEvent(new CustomEvent("ice-route.command", { detail }));
   }, []);
 
-  const executeWidgetAction = useCallback((action: WidgetAction) => {
-    if (action.type === "navigate") {
-      setFlyToPoint({
-        id: `widget-navigation-${Date.now()}`,
-        lat: action.lat,
-        lng: action.lng,
-        zoom: action.zoom,
-        name: "Widget navigation target",
-      });
-      setActiveTab("command");
-      return;
-    }
-
-    const waypoint: GeoPoint = {
-      id: `widget-waypoint-${Date.now()}`,
-      lat: action.lat,
-      lng: action.lng,
-      name: action.name || `Widget waypoint ${action.lat.toFixed(4)}, ${action.lng.toFixed(4)}`,
-    };
-
-    setWaypoints(prev => [...prev, waypoint]);
-    setFlyToPoint({ ...waypoint, zoom: 8 });
-    setActiveTab("command");
-  }, []);
-
   const runIceAnalysis = useCallback(async () => {
     const routeSignature = getRouteSignature(waypoints);
     const result = await requestIceClassAnalysis(waypoints, startDate, endDate);
@@ -701,35 +867,6 @@ export default function App() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    const handleWidgetText = (event: Event) => {
-      const text = (event as CustomEvent<{ text?: string }>).detail?.text;
-      if (!text) {
-        return;
-      }
-
-      const action = parseWidgetActionText(text);
-      if (action) {
-        executeWidgetAction(action);
-      }
-    };
-
-    const handleWidgetAction = (event: Event) => {
-      const action = parseWidgetActionDetail((event as CustomEvent).detail);
-      if (action) {
-        executeWidgetAction(action);
-      }
-    };
-
-    window.addEventListener("assistant.text", handleWidgetText);
-    window.addEventListener("furboats.action", handleWidgetAction);
-
-    return () => {
-      window.removeEventListener("assistant.text", handleWidgetText);
-      window.removeEventListener("furboats.action", handleWidgetAction);
-    };
-  }, [executeWidgetAction]);
 
   useEffect(() => {
     if (waypoints.length > previousWaypointCountRef.current) {
@@ -829,33 +966,11 @@ export default function App() {
 
   useEffect(() => {
     if (analysisRouteSignature && analysisRouteSignature !== getRouteSignature(waypoints)) {
+      setAnalysisResult(null);
+      setAnalysisRouteSignature(null);
       setShowAnalysis(false);
     }
   }, [analysisRouteSignature, waypoints]);
-
-  useEffect(() => {
-    if (!analysisRouteSignature || waypoints.length < 2 || analysisRouteSignature === getRouteSignature(waypoints)) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(async () => {
-      setIsAnalyzing(true);
-      try {
-        await runIceAnalysis();
-      } catch (error) {
-        console.error("Automatic ice class recalculation failed", error);
-        setMessages(prev => [...prev, {
-          role: "assistant",
-          content: error instanceof Error ? error.message : "Automatic ice-class recalculation failed.",
-        }]);
-        setChatOpen(true);
-      } finally {
-        setIsAnalyzing(false);
-      }
-    }, 900);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [analysisRouteSignature, runIceAnalysis, waypoints]);
 
   const handleGeocode = async (query: string) => {
     if (!query) return;
@@ -906,6 +1021,150 @@ export default function App() {
   const removeWaypoint = (id: string) => {
     setWaypoints(prev => prev.filter(p => p.id !== id));
   };
+
+  const handleAnalyze = useCallback(async () => {
+    if (waypoints.length < 2) return;
+    setIsAnalyzing(true);
+    setShowAnalysis(false);
+
+    try {
+      await runIceAnalysis();
+    } catch (error) {
+      console.error("Ice class analysis failed", error);
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: error instanceof Error ? error.message : "Ice-class analysis failed. Check AI configuration and try again.",
+      }]);
+      setChatOpen(true);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [runIceAnalysis, waypoints.length]);
+
+  const handleGenerateFullReport = useCallback(() => {
+    if (!analysisResult) {
+      sendWidgetCommand("report.unavailable", {
+        reason: "No current ICE class analysis is available. Calculate the route before generating a report.",
+      });
+      return;
+    }
+
+    const lines = buildReportLines(waypoints, analysisResult, startDate, endDate);
+    const pdf = createPdfBlob(lines);
+    const datestamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(pdf, `ice-route-report-${datestamp}.pdf`);
+    sendWidgetCommand("report.generated", {
+      filename: `ice-route-report-${datestamp}.pdf`,
+      legCount: analysisResult.legs.length,
+    });
+  }, [analysisResult, endDate, sendWidgetCommand, startDate, waypoints]);
+
+  const executeWidgetAction = useCallback((action: WidgetAction) => {
+    if (action.type === "navigate") {
+      setFlyToPoint({
+        id: `widget-navigation-${Date.now()}`,
+        lat: action.lat,
+        lng: action.lng,
+        zoom: action.zoom,
+        name: "Widget navigation target",
+      });
+      setActiveTab("command");
+      return;
+    }
+
+    if (action.type === "add_waypoint" || action.type === "insert_waypoint") {
+      const waypoint: GeoPoint = {
+        id: `widget-waypoint-${Date.now()}`,
+        lat: action.lat,
+        lng: action.lng,
+        name: action.name || `Widget waypoint ${action.lat.toFixed(4)}, ${action.lng.toFixed(4)}`,
+      };
+
+      if (action.type === "insert_waypoint") {
+        if (waypoints.length < 2 || action.afterLeg < 1 || action.afterLeg >= waypoints.length) {
+          sendWidgetCommand("insert_waypoint.rejected", {
+            reason: "Insert waypoint requires an existing leg number between route points.",
+            afterLeg: action.afterLeg,
+            waypointCount: waypoints.length,
+          });
+          return;
+        }
+
+        setWaypoints(prev => {
+          const insertAt = Math.max(1, Math.min(prev.length, action.afterLeg));
+          return [...prev.slice(0, insertAt), waypoint, ...prev.slice(insertAt)];
+        });
+      } else {
+        setWaypoints(prev => [...prev, waypoint]);
+      }
+
+      setFlyToPoint({ ...waypoint, zoom: 8 });
+      setActiveTab("command");
+      return;
+    }
+
+    if (action.type === "delete_leg") {
+      if (waypoints.length < 2 || action.leg < 1 || action.leg >= waypoints.length) {
+        sendWidgetCommand("delete_leg.rejected", {
+          reason: "Delete leg requires an existing leg number.",
+          leg: action.leg,
+          legCount: Math.max(0, waypoints.length - 1),
+        });
+        return;
+      }
+
+      setWaypoints(prev => {
+        const waypointIndexToRemove = action.leg;
+        return prev.filter((_, index) => index !== waypointIndexToRemove);
+      });
+      setActiveTab("command");
+      return;
+    }
+
+    if (action.type === "calculate_route") {
+      if (waypoints.length >= 2 && !isAnalyzing) {
+        void handleAnalyze();
+      } else {
+        sendWidgetCommand("calculate_route.rejected", {
+          reason: waypoints.length < 2 ? "At least two waypoints are required." : "Route calculation is already running.",
+        });
+      }
+      return;
+    }
+
+    if (action.type === "generate_report") {
+      handleGenerateFullReport();
+    }
+  }, [handleAnalyze, handleGenerateFullReport, isAnalyzing, sendWidgetCommand, waypoints]);
+
+  useEffect(() => {
+    const handleWidgetText = (event: Event) => {
+      const text = (event as CustomEvent<{ text?: string }>).detail?.text;
+      if (!text) {
+        return;
+      }
+
+      const action = parseWidgetActionText(text);
+      if (action) {
+        executeWidgetAction(action);
+      }
+    };
+
+    const handleWidgetAction = (event: Event) => {
+      const action = parseWidgetActionDetail((event as CustomEvent).detail);
+      if (action) {
+        executeWidgetAction(action);
+      }
+    };
+
+    window.addEventListener("assistant.text", handleWidgetText);
+    window.addEventListener("furboats.action", handleWidgetAction);
+
+    return () => {
+      window.removeEventListener("assistant.text", handleWidgetText);
+      window.removeEventListener("furboats.action", handleWidgetAction);
+    };
+  }, [executeWidgetAction]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -981,25 +1240,6 @@ export default function App() {
     const saved = JSON.parse(localStorage.getItem('saved_routes') || '[]');
     localStorage.setItem('saved_routes', JSON.stringify([newRoute, ...saved]));
     alert("Mission Route Saved to Archive");
-  };
-
-  const handleAnalyze = async () => {
-    if (waypoints.length < 2) return;
-    setIsAnalyzing(true);
-    setShowAnalysis(false);
-
-    try {
-      await runIceAnalysis();
-    } catch (error) {
-      console.error("Ice class analysis failed", error);
-      setMessages(prev => [...prev, {
-        role: "assistant",
-        content: error instanceof Error ? error.message : "Ice-class analysis failed. Check AI configuration and try again.",
-      }]);
-      setChatOpen(true);
-    } finally {
-      setIsAnalyzing(false);
-    }
   };
 
   const generateGeodeticPath = (p1: GeoPoint, p2: GeoPoint, segments = 50) => {
@@ -1357,7 +1597,11 @@ export default function App() {
                             <span className="text-[10px] font-bold font-mono text-on-surface-variant">TOTAL MISSION DISTANCE</span>
                             <span className="text-sm font-mono font-bold text-primary">{calculateTotalDistance(waypoints)} NM</span>
                          </div>
-                         <button className="w-full py-2 bg-primary text-background text-[10px] font-bold font-mono tracking-widest hover:bg-primary-dim transition-colors uppercase">
+                         <button
+                            onClick={handleGenerateFullReport}
+                            className="w-full py-2 bg-primary text-background text-[10px] font-bold font-mono tracking-widest hover:bg-primary-dim transition-colors uppercase flex items-center justify-center gap-2"
+                         >
+                            <Download size={14} />
                             Generate Full Report
                          </button>
                       </div>

@@ -1490,10 +1490,10 @@ export default function App() {
           <div className="h-8 w-[1px] bg-outline/20 mx-2" />
           <nav className="flex items-center gap-6 text-xs font-semibold">
             <button onClick={() => setActiveTab("command")} className={cn("hover:text-primary transition-colors", activeTab === "command" && "text-primary border-b border-primary")}>{t("command")}</button>
-            <button onClick={() => { setActiveTab("fleet"); setSelectedVessel(null); }} className={cn("hover:text-primary transition-colors", activeTab === "fleet" && "text-primary border-b border-primary")}>{t("fleet")}</button>
-            <button onClick={() => setActiveTab("routing")} className={cn("hover:text-primary transition-colors", activeTab === "routing" && "text-primary border-b border-primary")}>{t("charts")}</button>
-            <button onClick={() => setActiveTab("data")} className={cn("hover:text-primary transition-colors", activeTab === "data" && "text-primary border-b border-primary")}>{t("environmental")}</button>
-            <button onClick={() => setActiveTab("archive")} className={cn("hover:text-primary transition-colors", activeTab === "archive" && "text-primary border-b border-primary")}>{t("savedRoutes")}</button>
+            <button disabled className={cn("transition-colors cursor-default", activeTab === "fleet" && "text-primary border-b border-primary")}>{t("fleet")}</button>
+            <button disabled className={cn("transition-colors cursor-default", activeTab === "routing" && "text-primary border-b border-primary")}>{t("charts")}</button>
+            <button disabled className={cn("transition-colors cursor-default", activeTab === "data" && "text-primary border-b border-primary")}>{t("environmental")}</button>
+            <button disabled className={cn("transition-colors cursor-default", activeTab === "archive" && "text-primary border-b border-primary")}>{t("savedRoutes")}</button>
           </nav>
         </div>
 

@@ -1,4 +1,5 @@
 const SEA_ROUTE_UPSTREAM_URL = "https://usvmz35vpfuf3qaympixjlbfbe0dqian.lambda-url.eu-north-1.on.aws/route";
+const ICE_ANALYSIS_PATH = "/api/ice-class-analysis";
 
 export const ALLOWED_CORS_ORIGINS = new Set([
   "https://ice-navigator.com",
@@ -50,19 +51,8 @@ function jsonResponse(request, body, status = 200) {
   });
 }
 
-export async function handleSeaRoute(request) {
-  if (request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: corsHeadersFor(request),
-    });
-  }
-
-  if (request.method !== "POST") {
-    return jsonResponse(request, { error: "Method not allowed" }, 405);
-  }
-
-  const upstreamResponse = await fetch(SEA_ROUTE_UPSTREAM_URL, {
+async function proxyPost(request, upstreamUrl) {
+  const upstreamResponse = await fetch(upstreamUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -79,12 +69,50 @@ export async function handleSeaRoute(request) {
   });
 }
 
+export async function handleSeaRoute(request) {
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: corsHeadersFor(request),
+    });
+  }
+
+  if (request.method !== "POST") {
+    return jsonResponse(request, { error: "Method not allowed" }, 405);
+  }
+
+  return proxyPost(request, SEA_ROUTE_UPSTREAM_URL);
+}
+
+export async function handleIceAnalysis(request, env = {}) {
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: corsHeadersFor(request),
+    });
+  }
+
+  if (request.method !== "POST") {
+    return jsonResponse(request, { error: "Method not allowed" }, 405);
+  }
+
+  if (!env.ICE_ANALYSIS_API_URL) {
+    return jsonResponse(request, { error: "ICE_ANALYSIS_API_URL is not configured" }, 503);
+  }
+
+  return proxyPost(request, env.ICE_ANALYSIS_API_URL);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/sea-route") {
       return handleSeaRoute(request);
+    }
+
+    if (url.pathname === ICE_ANALYSIS_PATH) {
+      return handleIceAnalysis(request, env);
     }
 
     return env.ASSETS.fetch(request);

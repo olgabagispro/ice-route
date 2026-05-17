@@ -244,7 +244,7 @@ Supported commands:
 Current host behavior:
 
 - The first ice-class analysis is initiated by the user from the host app after selecting at least two route points.
-- A complete navigation period is required before ice-class calculation. The OpenAI request uses the period as a primary input and asks for the worst expected ice load across the full interval.
+- A complete navigation period is required before ice-class calculation. The backend ice-analysis request uses the period as a primary input and asks for the worst expected ice load across the full interval.
 - After a successful analysis, later route changes invalidate the existing ice-class result locally. The host does not automatically call AI again.
 - The widget should treat `ice_class.updated` as the authoritative analyzed route context for voice answers. If a later `route.updated` has `analyzed: false`, the previous ice-class context is stale and should not be used as current guidance.
 - A fresh `ice_class.updated` is emitted only after the user presses Calculate again and the AI request succeeds.

@@ -62,6 +62,7 @@ import { DateRangePicker } from "./components/DateRangePicker";
 import { dictionaries, type Language, type TranslationKey } from "./i18n";
 import { buildMapFitPoints, getMapFitPointSignature, type MapFitPoint } from "./features/routes/mapFitPoints";
 import ARC_ICE_CLASS_BUDGET_DELTA_MATRIX from "../docs/Arc_Ice_Class_Budget_Delta_Matrix.md?raw";
+import { requestIceClassAnalysis, type AnalysisResult } from "./features/iceAnalysis/iceAnalysisClient";
 
 /**
  * Utility for Tailwind class merging
@@ -829,7 +830,7 @@ function wrapPdfText(value: string, maxLength: number) {
   return lines.length ? lines : [""];
 }
 
-function formatCoordinate(point?: GeoPoint) {
+function formatCoordinate(point?: { lat: number; lng: number }) {
   if (!point) {
     return "n/a";
   }
@@ -1130,13 +1131,13 @@ export default function App() {
 
   const runIceAnalysis = useCallback(async () => {
     const routeSignature = getRouteSignature(waypoints);
-    const result = await requestIceClassAnalysis(waypoints, startDate, endDate);
+    const result = await requestIceClassAnalysis(waypoints, startDate, endDate, seaRouteLegs);
     setAnalysisResult(result);
     setAnalysisRouteSignature(routeSignature);
     setCompatibilityResult(null);
     setShowAnalysis(true);
     sendWidgetCommand("ice_class.updated", buildWidgetRouteContext(waypoints, result, startDate, endDate));
-  }, [endDate, sendWidgetCommand, startDate, waypoints]);
+  }, [endDate, seaRouteLegs, sendWidgetCommand, startDate, waypoints]);
 
   useEffect(() => {
     let cancelled = false;

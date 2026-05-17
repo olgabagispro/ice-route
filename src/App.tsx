@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { 
   Anchor, 
-  Map as MapIcon, 
   Navigation, 
   Settings, 
   Route, 
@@ -9,8 +8,6 @@ import {
   History,
   Ship,
   Search,
-  Maximize2,
-  Layers,
   Crosshair,
   Bookmark,
   ChevronDown,
@@ -1051,8 +1048,7 @@ export default function App() {
     }
   }, [selectedVessel]);
 
-  const [mapLayer, setMapLayer] = useState<"satellite" | "standard">("standard");
-  const [showLayers, setShowLayers] = useState(false);
+  const [mapLayer] = useState<"satellite" | "standard">("standard");
 
   // Auto-open sidebar when points are selected
   useEffect(() => {
@@ -2009,41 +2005,13 @@ export default function App() {
                 <WaypointBoundsHandler waypoints={waypoints} fitPoints={mapFitPoints} />
                 
                 <MapControls 
-                  isFullscreen={isMapFullscreen}
-                  onToggleFullscreen={() => {
-                    setIsMapFullscreen((current) => !current);
-                    setIsSidebarOpen(false);
-                  }}
                   onCenter={() => waypoints.length > 0 && setFlyToPoint(waypoints[0])} 
-                  onToggleLayers={() => setShowLayers(!showLayers)}
                   labels={{
-                    fullscreen: t("fullscreen"),
-                    layers: t("layers"),
                     centerOnVessel: t("centerOnVessel"),
                     zoomIn: t("zoomIn"),
                     zoomOut: t("zoomOut"),
                   }}
                 />
-
-                {/* Layers Selection Popup */}
-                {showLayers && (
-                  <div 
-                    className="leaflet-top leaflet-right" 
-                    style={{ marginTop: "80px", marginRight: "80px" }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <LayerPopup 
-                      mapLayer={mapLayer} 
-                      setMapLayer={setMapLayer} 
-                      onClose={() => setShowLayers(false)} 
-                      labels={{
-                        satelliteLive: t("satelliteLive"),
-                        standardCharts: t("standardCharts"),
-                      }}
-                    />
-                  </div>
-                )}
                 {waypoints.map((wp, index) => (
                   <Marker 
                     key={wp.id} 
@@ -2264,55 +2232,6 @@ function SortableWaypointItem({ waypoint, index, isLast, isHovered, onRemove, la
   );
 }
 
-function LayerPopup({ mapLayer, setMapLayer, onClose, labels }: { 
-  mapLayer: string; 
-  setMapLayer: (l: any) => void; 
-  onClose: () => void;
-  labels?: {
-    satelliteLive: string;
-    standardCharts: string;
-  };
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (containerRef.current) {
-      L.DomEvent.disableClickPropagation(containerRef.current);
-      L.DomEvent.disableScrollPropagation(containerRef.current);
-    }
-  }, []);
-
-  return (
-    <motion.div 
-      ref={containerRef}
-      initial={{ opacity: 0, scale: 0.9, x: 10 }}
-      animate={{ opacity: 1, scale: 1, x: 0 }}
-      className="leaflet-control technical-card glass-panel p-2 flex flex-col gap-1 min-w-[160px] shadow-2xl"
-    >
-      {[
-        { id: "satellite", label: labels?.satelliteLive || "Satellite (Live)", icon: MapIcon },
-        { id: "standard", label: labels?.standardCharts || "Standard Charts", icon: Navigation }
-      ].map((layer) => (
-        <button
-          key={layer.id}
-          onClick={(e) => {
-            e.stopPropagation();
-            setMapLayer(layer.id as any);
-            onClose();
-          }}
-          className={cn(
-            "flex items-center gap-2 px-3 py-2 text-[10px] font-mono tracking-wider transition-colors",
-            mapLayer === layer.id ? "text-primary bg-primary/10" : "text-on-surface-variant hover:bg-surface-highest"
-          )}
-        >
-          <layer.icon size={14} />
-          {layer.label.toUpperCase()}
-        </button>
-      ))}
-    </motion.div>
-  );
-}
-
 function FlyToHandler({ point, onComplete }: { point: MapNavigationTarget; onComplete: () => void }) {
   const map = useMap();
   useEffect(() => {
@@ -2375,14 +2294,9 @@ function WaypointBoundsHandler({ waypoints, fitPoints }: { waypoints: GeoPoint[]
   return null;
 }
 
-function MapControls({ isFullscreen, onToggleFullscreen, onCenter, onToggleLayers, labels }: {
-  isFullscreen: boolean;
-  onToggleFullscreen: () => void;
+function MapControls({ onCenter, labels }: {
   onCenter: () => void;
-  onToggleLayers: () => void;
   labels?: {
-    fullscreen: string;
-    layers: string;
     centerOnVessel: string;
     zoomIn: string;
     zoomOut: string;
@@ -2401,26 +2315,6 @@ function MapControls({ isFullscreen, onToggleFullscreen, onCenter, onToggleLayer
   return (
     <div ref={containerRef} className="leaflet-top leaflet-right" style={{ marginTop: "24px", marginRight: "24px" }}>
       <div className="leaflet-control flex flex-col gap-3 pointer-events-auto">
-        <div className="flex flex-col bg-surface border border-outline/20 shadow-2xl">
-          <button
-            title={labels?.fullscreen || "Fullscreen"}
-            onClick={onToggleFullscreen}
-            className={cn(
-              "p-3 text-on-surface hover:text-primary transition-colors border-b border-outline/20 focus:outline-none",
-              isFullscreen && "text-primary"
-            )}
-          >
-            <Maximize2 size={18} />
-          </button>
-          <button 
-            title={labels?.layers || "Layers"}
-            onClick={onToggleLayers}
-            className="p-3 text-on-surface hover:text-primary transition-colors border-b border-outline/20 focus:outline-none"
-          >
-            <Layers size={18} />
-          </button>
-        </div>
-        
         <button 
           title={labels?.centerOnVessel || "Center on Vessel"}
           onClick={onCenter}

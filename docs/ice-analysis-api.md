@@ -57,6 +57,10 @@ API response:
 
 The response intentionally matches the current React `AnalysisResult` shape used by the route cards, widget context, and PDF report path.
 
+## Frontend Idempotency
+
+The host builds a deterministic request key from the exact ice-analysis request inputs: route points, navigation window, per-leg northernmost point, distance, and available sea-route geometry. If the widget or user repeats `calculate_route` while the same key is already in flight, the host rejects the duplicate without another API call. If the same key has already completed, the host re-emits the cached `ice_class.updated` context instead of calling `/api/ice-class-analysis` again.
+
 ## Model And Data Boundary
 
 - OpenAI model: `gpt-5.4`.
@@ -124,4 +128,3 @@ curl -sS "$VITE_ICE_ANALYSIS_API_URL" \
 ```
 
 Expected: HTTP 200 with a top-level `legs` array and one leg for each input leg.
-

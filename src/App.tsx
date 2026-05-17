@@ -36,7 +36,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents, Tooltip, Polygon } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useIceLayers } from "./features/iceLayers/useIceLayers";
@@ -829,38 +829,6 @@ const MobileNav = ({ activeTab, setActiveTab, t }: { activeTab: string; setActiv
 };
 
 // --- Main Application ---
-
-// --- Regions and Zones ---
-const ICE_ZONES = [
-  {
-    name: "Arc9 Extreme Pack",
-    id: "zone-9",
-    coords: [[78, 60], [85, 60], [85, 150], [78, 150]] as [number, number][],
-    color: "#ef4444", // Red-500
-    description: "Multi-year ice. PC3/ARC9 Required."
-  },
-  {
-    name: "Arc7 Consolidation",
-    id: "zone-7",
-    coords: [[72, 40], [78, 40], [78, 160], [72, 160]] as [number, number][],
-    color: "#f59e0b", // Amber-500
-    description: "Consolidated first-year ice. ARC7 Required."
-  },
-  {
-    name: "Arc5 Seasonal Corridor",
-    id: "zone-5",
-    coords: [[66, 10], [72, 10], [72, 170], [66, 170]] as [number, number][],
-    color: "#eab308", // Yellow-500
-    description: "First-year ice. ARC5/ARC4 allowed."
-  },
-  {
-    name: "Ice3 Open Drift",
-    id: "zone-3",
-    coords: [[60, -10], [66, -10], [66, 180], [60, 180]] as [number, number][],
-    color: "#06b6d4", // Cyan-500
-    description: "Open pack ice. Ice1-Ice3 Class."
-  }
-];
 
 export default function App() {
   const [waypoints, setWaypoints] = useState<GeoPoint[]>([]);
@@ -1782,7 +1750,6 @@ export default function App() {
                 style={{ height: "100%", width: "100%" }}
                 zoomControl={false}
                 attributionControl={false}
-                preferCanvas
               >
                 <TileLayer
                   url={
@@ -1835,28 +1802,6 @@ export default function App() {
                     />
                   </div>
                 )}
-                
-                {ICE_ZONES.map(zone => (
-                  <Polygon 
-                    key={zone.id}
-                    positions={zone.coords}
-                    pathOptions={{
-                      fillColor: zone.color,
-                      fillOpacity: 0.15,
-                      color: zone.color,
-                      weight: 1,
-                      dashArray: "5, 5"
-                    }}
-                  >
-                    <Tooltip sticky>
-                      <div className="p-1 font-mono">
-                        <p className="text-xs font-bold" style={{ color: zone.color }}>{zone.name}</p>
-                        <p className="text-[10px] opacity-70">{zone.description}</p>
-                      </div>
-                    </Tooltip>
-                  </Polygon>
-                ))}
-
                 {waypoints.map((wp, index) => (
                   <Marker 
                     key={wp.id} 

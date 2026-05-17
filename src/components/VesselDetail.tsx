@@ -146,7 +146,7 @@ export function VesselDetail({ vessel, onBack, t }: VesselDetailProps) {
                 </div>
               </div>
 
-              <button className="w-full bg-secondary text-background font-bold font-mono tracking-[0.3em] text-xs py-5 hover:bg-secondary-dim active:scale-[0.98] transition-all flex items-center justify-center gap-3 shadow-xl shadow-secondary/10">
+              <button className="w-full bg-primary text-background font-bold font-mono tracking-[0.3em] text-xs py-5 hover:bg-primary-dim active:scale-[0.98] transition-all flex items-center justify-center gap-3 shadow-xl shadow-primary/10">
                 <Activity size={18} /> {t("runBridgeSimulation")}
               </button>
             </div>

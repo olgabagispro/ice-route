@@ -139,7 +139,7 @@ export function SavedRoutes({ onSwitchToFleet, t }: SavedRoutesProps) {
             </p>
           </div>
           <div className="flex gap-2 p-1 bg-surface-highest/20 border border-outline/20 backdrop-blur-md">
-            <button className="px-6 py-2 bg-secondary text-on-secondary font-bold font-mono text-[10px] tracking-widest transition-all">
+            <button className="px-6 py-2 bg-primary text-background font-bold font-mono text-[10px] tracking-widest transition-all">
               {t("routeHistory")}
             </button>
             <button 
@@ -203,7 +203,7 @@ export function SavedRoutes({ onSwitchToFleet, t }: SavedRoutesProps) {
                         <span className="text-[10px] font-bold font-mono text-on-surface-variant uppercase">{route.distance}</span>
                       </div>
                       <div className="ml-auto">
-                        <button className="py-2 px-6 bg-secondary text-background font-bold font-mono text-[10px] tracking-widest hover:bg-secondary-dim transition-colors flex items-center gap-2 shadow-lg shadow-secondary/10">
+                        <button className="py-2 px-6 bg-primary text-background font-bold font-mono text-[10px] tracking-widest hover:bg-primary-dim transition-colors flex items-center gap-2 shadow-lg shadow-primary/10">
                           {t("replayRoute")} <ChevronRight size={14} />
                         </button>
                       </div>

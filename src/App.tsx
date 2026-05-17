@@ -1782,6 +1782,7 @@ export default function App() {
                 style={{ height: "100%", width: "100%" }}
                 zoomControl={false}
                 attributionControl={false}
+                preferCanvas
               >
                 <TileLayer
                   url={

@@ -1094,7 +1094,9 @@ export default function App() {
         };
         setWaypoints(prev => [...prev, point]);
         setNewWaypointSearch("");
-        setFlyToPoint(point);
+        if (waypoints.length === 0) {
+          setFlyToPoint(point);
+        }
       }
     } catch (error) {
       console.error("Geocoding failed", error);
@@ -1216,7 +1218,9 @@ export default function App() {
         setWaypoints(prev => [...prev, waypoint]);
       }
 
-      setFlyToPoint({ ...waypoint, zoom: 8 });
+      if (waypoints.length === 0) {
+        setFlyToPoint({ ...waypoint, zoom: 8 });
+      }
       setActiveTab("command");
       return;
     }
@@ -1678,7 +1682,7 @@ export default function App() {
                                 <div className={cn(
                                   "px-1.5 py-0.5 text-[8px] font-bold font-mono rounded-none",
                                   leg.risk === "LOW" ? "bg-secondary/20 text-secondary" : 
-                                  leg.risk === "MEDIUM" ? "bg-tertiary/20 text-tertiary" : "bg-error/20 text-error"
+                                  leg.risk === "MODERATE" ? "bg-tertiary/20 text-tertiary" : "bg-error/20 text-error"
                                 )}>
                                   {leg.risk}
                                 </div>
@@ -1784,8 +1788,10 @@ export default function App() {
                 />
                 <MapEvents 
                   onAddWaypoint={addWaypointAtPos}
+                  shouldFlyToNewWaypoint={waypoints.length === 0}
                 />
                 {flyToPoint && <FlyToHandler point={flyToPoint} onComplete={() => setFlyToPoint(null)} />}
+                <WaypointBoundsHandler waypoints={waypoints} />
                 
                 <MapControls 
                   onCenter={() => waypoints.length > 0 && setFlyToPoint(waypoints[0])} 
@@ -2181,6 +2187,43 @@ function FlyToHandler({ point, onComplete }: { point: MapNavigationTarget; onCom
   return null;
 }
 
+function WaypointBoundsHandler({ waypoints }: { waypoints: GeoPoint[] }) {
+  const map = useMap();
+  const previousRouteSignatureRef = useRef("");
+
+  useEffect(() => {
+    const routeSignature = getRouteSignature(waypoints);
+
+    if (routeSignature === previousRouteSignatureRef.current) {
+      return;
+    }
+
+    previousRouteSignatureRef.current = routeSignature;
+
+    if (waypoints.length < 2) {
+      return;
+    }
+
+    const bounds = L.latLngBounds(
+      waypoints.map((point) => [point.lat, point.lng] as L.LatLngTuple)
+    );
+
+    if (!bounds.isValid()) {
+      return;
+    }
+
+    map.stop();
+    map.fitBounds(bounds, {
+      animate: true,
+      duration: 0.75,
+      maxZoom: 8,
+      padding: [80, 80],
+    });
+  }, [map, waypoints]);
+
+  return null;
+}
+
 function MapControls({ onCenter, onToggleLayers, onToggleIceLayers, labels }: {
   onCenter: () => void;
   onToggleLayers: () => void;
@@ -2249,15 +2292,19 @@ function MapControls({ onCenter, onToggleLayers, onToggleIceLayers, labels }: {
 }
 
 function MapEvents({ 
-  onAddWaypoint
+  onAddWaypoint,
+  shouldFlyToNewWaypoint,
 }: { 
-  onAddWaypoint: (lat: number, lng: number) => void
+  onAddWaypoint: (lat: number, lng: number) => void;
+  shouldFlyToNewWaypoint: boolean;
 }) {
   const map = useMap();
   useMapEvents({
     click(e) {
       onAddWaypoint(e.latlng.lat, e.latlng.lng);
-      map.flyTo([e.latlng.lat, e.latlng.lng], map.getZoom(), { animate: true });
+      if (shouldFlyToNewWaypoint) {
+        map.flyTo([e.latlng.lat, e.latlng.lng], map.getZoom(), { animate: true });
+      }
     },
   });
   return null;

@@ -1,14 +1,49 @@
 const SEA_ROUTE_UPSTREAM_URL = "https://usvmz35vpfuf3qaympixjlbfbe0dqian.lambda-url.eu-north-1.on.aws/route";
 
-const responseHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Content-Type": "application/json",
-};
+const allowedCorsOrigins = new Set([
+  "https://ice-navigator.com",
+  "https://www.ice-navigator.com",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+]);
+
+function isAllowedCorsOrigin(origin: string) {
+  if (allowedCorsOrigins.has(origin)) {
+    return true;
+  }
+
+  try {
+    const url = new URL(origin);
+
+    return (
+      url.protocol === "https:" &&
+      url.hostname.startsWith("ice-route.") &&
+      url.hostname.endsWith(".workers.dev")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function responseHeadersFor(request: Request) {
+  const origin = request.headers.get("Origin");
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Content-Type": "application/json",
+    "Vary": "Origin",
+  };
+
+  if (origin && isAllowedCorsOrigin(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  }
+
+  return headers;
+}
 
 export async function onRequest(context: { request: Request }) {
   const { request } = context;
+  const responseHeaders = responseHeadersFor(request);
 
   if (request.method === "OPTIONS") {
     return new Response(null, {

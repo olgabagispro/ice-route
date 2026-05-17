@@ -1,31 +1,65 @@
 const SEA_ROUTE_UPSTREAM_URL = "https://usvmz35vpfuf3qaympixjlbfbe0dqian.lambda-url.eu-north-1.on.aws/route";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+export const ALLOWED_CORS_ORIGINS = new Set([
+  "https://ice-navigator.com",
+  "https://www.ice-navigator.com",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+]);
 
-function jsonResponse(body, status = 200) {
+export function isAllowedCorsOrigin(origin) {
+  if (ALLOWED_CORS_ORIGINS.has(origin)) {
+    return true;
+  }
+
+  try {
+    const url = new URL(origin);
+
+    return (
+      url.protocol === "https:" &&
+      url.hostname.startsWith("ice-route.") &&
+      url.hostname.endsWith(".workers.dev")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function corsHeadersFor(request) {
+  const origin = request.headers.get("Origin");
+  const headers = {
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Vary": "Origin",
+  };
+
+  if (origin && isAllowedCorsOrigin(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  }
+
+  return headers;
+}
+
+function jsonResponse(request, body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
-      ...corsHeaders,
+      ...corsHeadersFor(request),
       "Content-Type": "application/json",
     },
   });
 }
 
-async function handleSeaRoute(request) {
+export async function handleSeaRoute(request) {
   if (request.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: corsHeaders,
+      headers: corsHeadersFor(request),
     });
   }
 
   if (request.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return jsonResponse(request, { error: "Method not allowed" }, 405);
   }
 
   const upstreamResponse = await fetch(SEA_ROUTE_UPSTREAM_URL, {
@@ -39,7 +73,7 @@ async function handleSeaRoute(request) {
   return new Response(await upstreamResponse.text(), {
     status: upstreamResponse.status,
     headers: {
-      ...corsHeaders,
+      ...corsHeadersFor(request),
       "Content-Type": upstreamResponse.headers.get("Content-Type") || "application/json",
     },
   });

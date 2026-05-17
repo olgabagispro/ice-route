@@ -62,6 +62,7 @@ import { VesselDetail } from "./components/VesselDetail";
 import { DateRangePicker } from "./components/DateRangePicker";
 import { dictionaries, type Language, type TranslationKey } from "./i18n";
 import { buildMapFitPoints, getMapFitPointSignature, type MapFitPoint } from "./features/routes/mapFitPoints";
+import { requestIceClassAnalysis, type AnalysisResult } from "./features/iceAnalysis/iceAnalysisClient";
 
 /**
  * Utility for Tailwind class merging
@@ -120,24 +121,6 @@ interface MapNavigationTarget {
   name?: string;
 }
 
-interface LegAnalysis {
-  from: string;
-  to: string;
-  fromPoint?: GeoPoint;
-  toPoint?: GeoPoint;
-  iceClass: string;
-  thickness: string;
-  risk: "LOW" | "MODERATE" | "HIGH";
-  integrity: number;
-  distance: number;
-  demandingSegment: string;
-  advisories: { type: "ice" | "seasonal" | "warning"; title: string; description: string }[];
-}
-
-interface AnalysisResult {
-  legs: LegAnalysis[];
-}
-
 interface SeaRouteFeature {
   type: "Feature";
   geometry?: {
@@ -160,34 +143,6 @@ interface SeaRouteLeg {
   durationHours?: number;
 }
 
-interface OpenAIResponse {
-  output_text?: string;
-  output?: Array<{
-    content?: Array<{
-      text?: string;
-      type?: string;
-    }>;
-  }>;
-  error?: {
-    message?: string;
-  };
-}
-
-interface IceClassAIResponse {
-  legs: Array<{
-    iceClass: string;
-    thickness: string;
-    risk: "LOW" | "MODERATE" | "HIGH";
-    integrity: number;
-    demandingSegment: string;
-    advisories: Array<{
-      type: "ice" | "seasonal" | "warning";
-      title: string;
-      description: string;
-    }>;
-  }>;
-}
-
 type WidgetAction =
   | { type: "navigate"; lng: number; lat: number; zoom?: number }
   | { type: "add_waypoint"; lng: number; lat: number; name?: string }
@@ -203,7 +158,6 @@ const FURBOATS_WIDGET_ELEMENT_ID = "furboats-voice-agent-widget";
 const FURBOATS_WIDGET_URL = "https://furboats-openai-live-develop.denslov.workers.dev/widget/v1/furboats-voice-widget.js";
 const FURBOATS_WIDGET_BACKEND_URL = "https://furboats-openai-live-dev.denslov.workers.dev";
 const SEA_ROUTE_API_URL = "/api/sea-route";
-const ICE_ANALYSIS_SYSTEM_INSTRUCTION = "You are Ice Route AI, a polar maritime route analyst. Return conservative advisory ice-class estimates for each route leg. Use only the supplied route coordinates and dates. This is planning guidance, not an authoritative navigation order.";
 
 const SUPPORTED_WIDGET_ACTIONS = [
   "/action navigate lng,lat,zoom",
@@ -215,124 +169,6 @@ const SUPPORTED_WIDGET_ACTIONS = [
   "/action calculate_route",
   "/action generate_report",
 ] as const;
-
-const ICE_ANALYSIS_RESPONSE_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["legs"],
-  properties: {
-    legs: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["iceClass", "thickness", "risk", "integrity", "demandingSegment", "advisories"],
-        properties: {
-          iceClass: {
-            type: "string",
-            description: "Recommended minimum ice class for this leg, for example Ice3, Arc4, Arc7, Arc9, or Open Water.",
-          },
-          thickness: {
-            type: "string",
-            description: "Estimated ice thickness label such as 0.4m, 1.2m, or Unknown.",
-          },
-          risk: {
-            type: "string",
-            enum: ["LOW", "MODERATE", "HIGH"],
-          },
-          integrity: {
-            type: "integer",
-            minimum: 0,
-            maximum: 100,
-            description: "Confidence/integrity score for this advisory estimate.",
-          },
-          demandingSegment: {
-            type: "string",
-            description: "Short description of the most demanding part of this leg.",
-          },
-          advisories: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              required: ["type", "title", "description"],
-              properties: {
-                type: {
-                  type: "string",
-                  enum: ["ice", "seasonal", "warning"],
-                },
-                title: {
-                  type: "string",
-                },
-                description: {
-                  type: "string",
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-} as const;
-
-function getOpenAIResponseText(response: OpenAIResponse) {
-  if (response.output_text) {
-    return response.output_text;
-  }
-
-  return response.output
-    ?.flatMap((item) => item.content || [])
-    .map((content) => content.text)
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-}
-
-function parseOpenAIJson<T>(response: OpenAIResponse): T {
-  const text = getOpenAIResponseText(response);
-  if (!text) {
-    throw new Error("AI response did not include structured output.");
-  }
-
-  return JSON.parse(text) as T;
-}
-
-function buildIceAnalysisPrompt(waypoints: GeoPoint[], startDate: string, endDate: string) {
-  const legs = waypoints.slice(0, -1).map((from, index) => {
-    const to = waypoints[index + 1];
-    return {
-      index: index + 1,
-      from: {
-        name: from.name || `Waypoint ${index + 1}`,
-        lat: from.lat,
-        lng: from.lng,
-      },
-      to: {
-        name: to.name || `Waypoint ${index + 2}`,
-        lat: to.lat,
-        lng: to.lng,
-      },
-      distanceNm: calculateRouteDistance([from, to]),
-    };
-  });
-
-  return JSON.stringify({
-    task: "Estimate the worst expected ice load, required ice class, and route risk for every route leg across the supplied navigation period.",
-    outputRules: [
-      "Return exactly one legs item for each input leg, in the same order.",
-      "Use concise maritime wording suitable for UI cards.",
-      "The navigation period is mandatory. Use it as a primary factor because worst-case ice load depends strongly on season.",
-      "Estimate the worst expected ice condition within the entire startDate-to-endDate interval, not an average condition.",
-      "If public ice data is not available in this prompt, make a conservative planning estimate from latitude, season, navigation period, and segment length.",
-    ],
-    navigationWindow: {
-      startDate,
-      endDate,
-    },
-    legs,
-  });
-}
 
 function hasNavigationPeriod(startDate: string, endDate: string) {
   return Boolean(startDate && endDate);
@@ -367,71 +203,6 @@ async function requestSeaRoute(from: GeoPoint, to: GeoPoint, signal: AbortSignal
   }
 
   return data;
-}
-
-async function requestIceClassAnalysis(waypoints: GeoPoint[], startDate: string, endDate: string): Promise<AnalysisResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OpenAI API key is not configured. Add OPENAI_API_KEY to .env.local and restart the dev server.");
-  }
-
-  if (!hasNavigationPeriod(startDate, endDate)) {
-    throw new Error("Navigation period is required for ice-load calculation.");
-  }
-
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
-      instructions: ICE_ANALYSIS_SYSTEM_INSTRUCTION,
-      input: buildIceAnalysisPrompt(waypoints, startDate, endDate),
-      text: {
-        format: {
-          type: "json_schema",
-          name: "ice_route_analysis",
-          strict: true,
-          schema: ICE_ANALYSIS_RESPONSE_SCHEMA,
-        },
-      },
-    }),
-  });
-
-  const data = await response.json() as OpenAIResponse;
-  if (!response.ok) {
-    throw new Error(data.error?.message || "OpenAI ice-class analysis failed");
-  }
-
-  const parsed = parseOpenAIJson<IceClassAIResponse>(data);
-  const legs = waypoints.slice(0, -1).map((fromPoint, index): LegAnalysis => {
-    const toPoint = waypoints[index + 1];
-    const aiLeg = parsed.legs[index];
-
-    return {
-      from: fromPoint.name?.split(",")[0] || `Waypoint ${index + 1}`,
-      to: toPoint.name?.split(",")[0] || `Waypoint ${index + 2}`,
-      fromPoint,
-      toPoint,
-      iceClass: aiLeg?.iceClass || "Unknown",
-      thickness: aiLeg?.thickness || "Unknown",
-      risk: aiLeg?.risk || "MODERATE",
-      integrity: Math.max(0, Math.min(100, Number(aiLeg?.integrity ?? 50))),
-      distance: calculateRouteDistance([fromPoint, toPoint]),
-      demandingSegment: aiLeg?.demandingSegment || `Section ${index + 1}: ${fromPoint.name || "Waypoint"} to ${toPoint.name || "Waypoint"}`,
-      advisories: aiLeg?.advisories?.length ? aiLeg.advisories : [
-        {
-          type: "warning",
-          title: "Manual Review",
-          description: "AI response did not include advisories for this segment.",
-        },
-      ],
-    };
-  });
-
-  return { legs };
 }
 
 function isValidCoordinate(lat: number, lng: number) {
@@ -684,7 +455,7 @@ function wrapPdfText(value: string, maxLength: number) {
   return lines.length ? lines : [""];
 }
 
-function formatCoordinate(point?: GeoPoint) {
+function formatCoordinate(point?: { lat: number; lng: number }) {
   if (!point) {
     return "n/a";
   }
@@ -894,12 +665,12 @@ export default function App() {
 
   const runIceAnalysis = useCallback(async () => {
     const routeSignature = getRouteSignature(waypoints);
-    const result = await requestIceClassAnalysis(waypoints, startDate, endDate);
+    const result = await requestIceClassAnalysis(waypoints, startDate, endDate, seaRouteLegs);
     setAnalysisResult(result);
     setAnalysisRouteSignature(routeSignature);
     setShowAnalysis(true);
     sendWidgetCommand("ice_class.updated", buildWidgetRouteContext(waypoints, result, startDate, endDate));
-  }, [endDate, sendWidgetCommand, startDate, waypoints]);
+  }, [endDate, seaRouteLegs, sendWidgetCommand, startDate, waypoints]);
 
   useEffect(() => {
     let cancelled = false;

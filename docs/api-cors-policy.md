@@ -1,6 +1,6 @@
 # API CORS Policy
 
-The sea-route proxy endpoint at `/api/sea-route` only returns `Access-Control-Allow-Origin` for approved browser origins.
+The proxy endpoints at `/api/sea-route` and `/api/ice-class-analysis` only return `Access-Control-Allow-Origin` for approved browser origins.
 
 Approved origins:
 
@@ -14,3 +14,4 @@ The Worker and Pages Functions entrypoints should stay in sync because the repos
 
 - `worker/index.js`
 - `functions/api/sea-route.ts`
+- `functions/api/ice-class-analysis.ts`

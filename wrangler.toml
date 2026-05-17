@@ -3,6 +3,9 @@ compatibility_date = "2026-05-16"
 main = "worker/index.js"
 workers_dev = true
 
+[vars]
+ICE_ANALYSIS_API_URL = "https://63hymgm7h0.execute-api.us-east-1.amazonaws.com/ice-class-analysis"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"

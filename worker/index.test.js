@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { corsHeadersFor, handleSeaRoute, isAllowedCorsOrigin } from "./index.js";
+import { corsHeadersFor, handleIceAnalysis, handleSeaRoute, isAllowedCorsOrigin } from "./index.js";
 
 test("allows the production ice-navigator origins", () => {
   assert.equal(isAllowedCorsOrigin("https://ice-navigator.com"), true);
@@ -51,4 +51,19 @@ test("handles allowed CORS preflight requests", async () => {
 
   assert.equal(response.status, 204);
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://ice-navigator.com");
+});
+
+test("rejects ice-analysis proxy calls when upstream URL is not configured", async () => {
+  const response = await handleIceAnalysis(
+    new Request("https://ice-route.example.workers.dev/api/ice-class-analysis", {
+      method: "POST",
+      headers: { Origin: "https://ice-navigator.com" },
+      body: JSON.stringify({ legs: [] }),
+    }),
+    {},
+  );
+
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://ice-navigator.com");
+  assert.equal((await response.json()).error, "ICE_ANALYSIS_API_URL is not configured");
 });

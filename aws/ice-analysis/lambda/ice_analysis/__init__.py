@@ -1,0 +1,2 @@
+"""Ice analysis Lambda package."""
+

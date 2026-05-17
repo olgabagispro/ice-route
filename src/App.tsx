@@ -18,7 +18,6 @@ import {
   ChevronDown,
   ChevronRight,
   Info,
-  Shield,
   ShieldCheck,
   AlertTriangle,
   Zap,
@@ -43,7 +42,6 @@ import L from "leaflet";
 import { useIceLayers } from "./features/iceLayers/useIceLayers";
 import { IceLayerToggle } from "./features/iceLayers/IceLayerToggle";
 import { IceMetadataPopup } from "./features/iceLayers/IceMetadataPopup";
-import { ICE_CLASS_LABELS, ICE_CLASS_COLORS } from "./features/iceLayers/iceClassification";
 import {
   DndContext, 
   closestCenter,
@@ -1909,9 +1907,6 @@ export default function App() {
               </MapContainer>
             </div>
 
-            {/* Map Legend */}
-            <Legend showIceClasses={showIceLayers} t={t} />
-
             <div className="absolute bottom-6 left-6 z-30 hidden md:block">
               {(isSeaRouting || seaRouteError) && (
                 <p className={cn(
@@ -2121,59 +2116,6 @@ function LayerPopup({ mapLayer, setMapLayer, onClose, labels }: {
     </motion.div>
   );
 }
-
-const Legend = ({ showIceClasses, t }: { showIceClasses?: boolean; t: (key: TranslationKey) => string }) => (
-  <div 
-    onMouseDown={(e) => e.stopPropagation()}
-    className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#0c141c]/90 backdrop-blur-xl border border-outline/30 p-4 flex flex-col gap-4 items-center z-30 shadow-2xl rounded-none max-w-[95vw]"
-  >
-    <div className="flex flex-col md:flex-row gap-4 md:gap-8 items-start md:items-center">
-      <div className="flex items-center gap-2 border-r border-outline/20 pr-4">
-        <Shield size={14} className="text-secondary" />
-        <span className="text-[10px] font-bold font-mono text-on-surface uppercase tracking-widest whitespace-nowrap">{t("vesselRequirements")}</span>
-      </div>
-      
-      <div className="grid grid-cols-2 md:flex items-center gap-4 md:gap-6">
-        {ICE_ZONES.slice().reverse().map(zone => (
-          <div key={zone.id} className="flex items-center gap-2 group cursor-help">
-            <div className="w-3 h-3 border transition-transform group-hover:scale-110" style={{ backgroundColor: `${zone.color}33`, borderColor: zone.color }} />
-            <div className="flex flex-col">
-              <span className="text-[10px] font-bold font-mono text-on-surface tracking-tighter">{zone.id.split('-')[1].toUpperCase()}</span>
-              <span className="text-[8px] font-mono text-outline uppercase tracking-tight hidden md:block">{t("required")}</span>
-            </div>
-          </div>
-        ))}
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-[1px] border-t border-dashed border-primary" />
-          <span className="text-[10px] font-mono text-on-surface tracking-tighter">{t("plannedRoute")}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-[2px] bg-secondary" />
-          <span className="text-[10px] font-mono text-on-surface tracking-tighter">{t("maritimeRoute")}</span>
-        </div>
-      </div>
-    </div>
-
-    {showIceClasses && (
-      <div className="flex flex-col md:flex-row gap-4 md:gap-8 items-start md:items-center pt-3 border-t border-outline/10 w-full justify-center">
-        <div className="flex items-center gap-2 border-r border-outline/20 pr-4">
-          <Snowflake size={14} className="text-primary" />
-          <span className="text-[10px] font-bold font-mono text-on-surface uppercase tracking-widest whitespace-nowrap">{t("seaIceData")}</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-4 md:gap-6">
-          {Object.entries(ICE_CLASS_COLORS).map(([id, color]) => (
-            <div key={id} className="flex items-center gap-2">
-              <div className="w-3 h-3 border" style={{ backgroundColor: `${color}33`, borderColor: color }} />
-              <span className="text-[9px] font-mono font-bold text-on-surface tracking-tight uppercase">
-                {ICE_CLASS_LABELS[id as keyof typeof ICE_CLASS_LABELS].replace('Ice Class ', '')}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
-  </div>
-);
 
 function FlyToHandler({ point, onComplete }: { point: MapNavigationTarget; onComplete: () => void }) {
   const map = useMap();

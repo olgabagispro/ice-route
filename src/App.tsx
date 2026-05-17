@@ -191,6 +191,7 @@ const FURBOATS_WIDGET_ELEMENT_ID = "furboats-voice-agent-widget";
 const FURBOATS_WIDGET_URL = "https://furboats-openai-live-develop.denslov.workers.dev/widget/v1/furboats-voice-widget.js";
 const FURBOATS_WIDGET_BACKEND_URL = "https://furboats-openai-live-dev.denslov.workers.dev";
 const SEA_ROUTE_API_URL = "/api/sea-route";
+const VESSEL_FIT_REPORTS_ENABLED = false;
 
 const SUPPORTED_WIDGET_ACTIONS = [
   "/action navigate lng,lat,zoom",
@@ -1283,14 +1284,15 @@ export default function App() {
       return;
     }
 
-    const lines = buildReportLines(waypoints, analysisResult, startDate, endDate, compatibilityResult);
+    const reportCompatibilityResult = VESSEL_FIT_REPORTS_ENABLED ? compatibilityResult : null;
+    const lines = buildReportLines(waypoints, analysisResult, startDate, endDate, reportCompatibilityResult);
     const pdf = createPdfBlob(lines);
     const datestamp = new Date().toISOString().slice(0, 10);
     downloadBlob(pdf, `ice-route-report-${datestamp}.pdf`);
     sendWidgetCommand("report.generated", {
       filename: `ice-route-report-${datestamp}.pdf`,
       legCount: analysisResult.legs.length,
-      hasVesselFit: Boolean(compatibilityResult),
+      hasVesselFit: Boolean(reportCompatibilityResult),
     });
   }, [analysisResult, compatibilityResult, endDate, sendWidgetCommand, startDate, t, waypoints]);
 
@@ -1804,137 +1806,139 @@ export default function App() {
                          </button>
                       </div>
 
-                      <div className="technical-card p-4 rounded-none bg-surface-highest/10 border-outline/10 space-y-4">
-                        <TechnicalBorder />
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="flex items-center gap-2 mb-2">
-                              <ShieldCheck size={15} className="text-primary" />
-                              <h3 className="text-[10px] font-bold font-mono tracking-[0.2em] text-primary">{t("vesselFitTitle")}</h3>
+                      {VESSEL_FIT_REPORTS_ENABLED && (
+                        <div className="technical-card p-4 rounded-none bg-surface-highest/10 border-outline/10 space-y-4">
+                          <TechnicalBorder />
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2 mb-2">
+                                <ShieldCheck size={15} className="text-primary" />
+                                <h3 className="text-[10px] font-bold font-mono tracking-[0.2em] text-primary">{t("vesselFitTitle")}</h3>
+                              </div>
+                              <p className="text-[10px] leading-relaxed text-on-surface-variant font-mono tracking-wider">
+                                {t("vesselFitCta")}
+                              </p>
                             </div>
-                            <p className="text-[10px] leading-relaxed text-on-surface-variant font-mono tracking-wider">
-                              {t("vesselFitCta")}
-                            </p>
                           </div>
-                        </div>
 
-                        <div className="space-y-2">
-                          <label className="text-[9px] font-bold font-mono text-on-surface-variant tracking-widest">{t("selectVessel")}</label>
-                          <select
-                            value={compatibilityVesselId}
-                            onChange={(event) => {
-                              setCompatibilityVesselId(event.target.value);
-                              setCompatibilityResult(null);
-                            }}
-                            className="w-full bg-background/60 border border-outline/30 px-3 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:border-primary"
-                          >
-                            {INITIAL_VESSELS.map((vessel) => (
-                              <option key={vessel.id} value={vessel.id}>
-                                {vessel.name} / {vessel.iceClass}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <button
-                          onClick={handleCheckVesselCompatibility}
-                          disabled={isCheckingCompatibility || !analysisResult}
-                          className={cn(
-                            "w-full py-3 border border-primary/40 bg-primary/10 text-primary text-[10px] font-bold font-mono tracking-widest hover:bg-primary/20 transition-colors uppercase flex items-center justify-center gap-2",
-                            (isCheckingCompatibility || !analysisResult) && "opacity-50 cursor-not-allowed"
-                          )}
-                        >
-                          {isCheckingCompatibility ? (
-                            <>
-                              <Loader2 size={14} className="animate-spin" />
-                              {t("checkingVesselFit")}
-                            </>
-                          ) : (
-                            <>
-                              <ShieldCheck size={14} />
-                              {t("checkVesselFit")}
-                            </>
-                          )}
-                        </button>
-
-                        {compatibilityResult && (
-                          <div className="space-y-4 pt-2 border-t border-outline/10">
-                            <div className="flex flex-col gap-3">
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="text-[9px] font-bold font-mono text-on-surface-variant tracking-widest">{t("overallStatus")}</span>
-                                <span className={cn(
-                                  "px-2 py-1 border text-[9px] font-bold font-mono tracking-widest",
-                                  getCompatibilityStatusClass(compatibilityResult.overallStatus)
-                                )}>
-                                  {getCompatibilityStatusLabel(compatibilityResult.overallStatus, t)}
-                                </span>
-                              </div>
-                              <p className="text-xs leading-relaxed text-on-surface">{compatibilityResult.summary}</p>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <div className="border border-outline/10 bg-background/30 p-3">
-                                  <p className="text-[8px] font-bold font-mono text-on-surface-variant tracking-widest mb-1">{t("routeRequiredClass")}</p>
-                                  <p className="text-sm font-bold text-primary">{compatibilityResult.routeRequiredClass}</p>
-                                </div>
-                                <div className="border border-outline/10 bg-background/30 p-3">
-                                  <p className="text-[8px] font-bold font-mono text-on-surface-variant tracking-widest mb-1">{t("selectedVesselClass")}</p>
-                                  <p className="text-sm font-bold text-secondary">{compatibilityResult.vesselClass}</p>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="space-y-2">
-                              {compatibilityResult.checks.map((check, index) => (
-                                <div key={`${check.area}-${index}`} className="border border-outline/10 bg-background/30 p-3 space-y-2">
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                      <p className="text-[10px] font-bold font-mono text-on-surface tracking-widest truncate">{check.area}</p>
-                                      <p className="text-[9px] text-on-surface-variant leading-relaxed">{check.delta}</p>
-                                    </div>
-                                    <div className={cn("flex items-center gap-1 text-[9px] font-bold font-mono", getCheckStatusClass(check.status))}>
-                                      {check.status === "pass" && <CheckCircle2 size={14} />}
-                                      {check.status === "fail" && <XCircle size={14} />}
-                                      {check.status === "review" && <AlertTriangle size={14} />}
-                                      {getCheckStatusLabel(check.status, t)}
-                                    </div>
-                                  </div>
-                                  <div className="grid grid-cols-1 gap-2 text-[10px] leading-relaxed text-on-surface-variant">
-                                    <p><span className="font-bold text-primary">{t("fitRouteRequirement")}:</span> {check.routeRequirement}</p>
-                                    <p><span className="font-bold text-secondary">{t("fitVesselCapability")}:</span> {check.vesselCapability}</p>
-                                    <p><span className="font-bold text-tertiary">{t("fitRecommendation")}:</span> {check.recommendation}</p>
-                                  </div>
-                                </div>
+                          <div className="space-y-2">
+                            <label className="text-[9px] font-bold font-mono text-on-surface-variant tracking-widest">{t("selectVessel")}</label>
+                            <select
+                              value={compatibilityVesselId}
+                              onChange={(event) => {
+                                setCompatibilityVesselId(event.target.value);
+                                setCompatibilityResult(null);
+                              }}
+                              className="w-full bg-background/60 border border-outline/30 px-3 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:border-primary"
+                            >
+                              {INITIAL_VESSELS.map((vessel) => (
+                                <option key={vessel.id} value={vessel.id}>
+                                  {vessel.name} / {vessel.iceClass}
+                                </option>
                               ))}
-                            </div>
-
-                            {(compatibilityResult.missingInputs.length > 0 || compatibilityResult.reportNotes.length > 0) && (
-                              <div className="space-y-3 text-[10px] text-on-surface-variant leading-relaxed">
-                                {compatibilityResult.missingInputs.length > 0 && (
-                                  <div>
-                                    <p className="font-bold font-mono text-tertiary tracking-widest mb-1">{t("missingInputs")}</p>
-                                    <ul className="space-y-1">
-                                      {compatibilityResult.missingInputs.map((item, index) => (
-                                        <li key={`${item}-${index}`}>- {item}</li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                )}
-                                {compatibilityResult.reportNotes.length > 0 && (
-                                  <div>
-                                    <p className="font-bold font-mono text-on-surface tracking-widest mb-1">{t("reportNotes")}</p>
-                                    <ul className="space-y-1">
-                                      {compatibilityResult.reportNotes.map((item, index) => (
-                                        <li key={`${item}-${index}`}>- {item}</li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            <p className="text-[9px] leading-relaxed text-outline">{t("vesselFitDisclaimer")}</p>
+                            </select>
                           </div>
-                        )}
-                      </div>
+
+                          <button
+                            onClick={handleCheckVesselCompatibility}
+                            disabled={isCheckingCompatibility || !analysisResult}
+                            className={cn(
+                              "w-full py-3 border border-primary/40 bg-primary/10 text-primary text-[10px] font-bold font-mono tracking-widest hover:bg-primary/20 transition-colors uppercase flex items-center justify-center gap-2",
+                              (isCheckingCompatibility || !analysisResult) && "opacity-50 cursor-not-allowed"
+                            )}
+                          >
+                            {isCheckingCompatibility ? (
+                              <>
+                                <Loader2 size={14} className="animate-spin" />
+                                {t("checkingVesselFit")}
+                              </>
+                            ) : (
+                              <>
+                                <ShieldCheck size={14} />
+                                {t("checkVesselFit")}
+                              </>
+                            )}
+                          </button>
+
+                          {compatibilityResult && (
+                            <div className="space-y-4 pt-2 border-t border-outline/10">
+                              <div className="flex flex-col gap-3">
+                                <div className="flex items-center justify-between gap-3">
+                                  <span className="text-[9px] font-bold font-mono text-on-surface-variant tracking-widest">{t("overallStatus")}</span>
+                                  <span className={cn(
+                                    "px-2 py-1 border text-[9px] font-bold font-mono tracking-widest",
+                                    getCompatibilityStatusClass(compatibilityResult.overallStatus)
+                                  )}>
+                                    {getCompatibilityStatusLabel(compatibilityResult.overallStatus, t)}
+                                  </span>
+                                </div>
+                                <p className="text-xs leading-relaxed text-on-surface">{compatibilityResult.summary}</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <div className="border border-outline/10 bg-background/30 p-3">
+                                    <p className="text-[8px] font-bold font-mono text-on-surface-variant tracking-widest mb-1">{t("routeRequiredClass")}</p>
+                                    <p className="text-sm font-bold text-primary">{compatibilityResult.routeRequiredClass}</p>
+                                  </div>
+                                  <div className="border border-outline/10 bg-background/30 p-3">
+                                    <p className="text-[8px] font-bold font-mono text-on-surface-variant tracking-widest mb-1">{t("selectedVesselClass")}</p>
+                                    <p className="text-sm font-bold text-secondary">{compatibilityResult.vesselClass}</p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                {compatibilityResult.checks.map((check, index) => (
+                                  <div key={`${check.area}-${index}`} className="border border-outline/10 bg-background/30 p-3 space-y-2">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <p className="text-[10px] font-bold font-mono text-on-surface tracking-widest truncate">{check.area}</p>
+                                        <p className="text-[9px] text-on-surface-variant leading-relaxed">{check.delta}</p>
+                                      </div>
+                                      <div className={cn("flex items-center gap-1 text-[9px] font-bold font-mono", getCheckStatusClass(check.status))}>
+                                        {check.status === "pass" && <CheckCircle2 size={14} />}
+                                        {check.status === "fail" && <XCircle size={14} />}
+                                        {check.status === "review" && <AlertTriangle size={14} />}
+                                        {getCheckStatusLabel(check.status, t)}
+                                      </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 gap-2 text-[10px] leading-relaxed text-on-surface-variant">
+                                      <p><span className="font-bold text-primary">{t("fitRouteRequirement")}:</span> {check.routeRequirement}</p>
+                                      <p><span className="font-bold text-secondary">{t("fitVesselCapability")}:</span> {check.vesselCapability}</p>
+                                      <p><span className="font-bold text-tertiary">{t("fitRecommendation")}:</span> {check.recommendation}</p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {(compatibilityResult.missingInputs.length > 0 || compatibilityResult.reportNotes.length > 0) && (
+                                <div className="space-y-3 text-[10px] text-on-surface-variant leading-relaxed">
+                                  {compatibilityResult.missingInputs.length > 0 && (
+                                    <div>
+                                      <p className="font-bold font-mono text-tertiary tracking-widest mb-1">{t("missingInputs")}</p>
+                                      <ul className="space-y-1">
+                                        {compatibilityResult.missingInputs.map((item, index) => (
+                                          <li key={`${item}-${index}`}>- {item}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {compatibilityResult.reportNotes.length > 0 && (
+                                    <div>
+                                      <p className="font-bold font-mono text-on-surface tracking-widest mb-1">{t("reportNotes")}</p>
+                                      <ul className="space-y-1">
+                                        {compatibilityResult.reportNotes.map((item, index) => (
+                                          <li key={`${item}-${index}`}>- {item}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              <p className="text-[9px] leading-relaxed text-outline">{t("vesselFitDisclaimer")}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>

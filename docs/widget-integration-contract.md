@@ -248,6 +248,7 @@ Current host behavior:
 - After a successful analysis, later route changes invalidate the existing ice-class result locally. The host does not automatically call AI again.
 - The widget should treat `ice_class.updated` as the authoritative analyzed route context for voice answers. If a later `route.updated` has `analyzed: false`, the previous ice-class context is stale and should not be used as current guidance.
 - A fresh `ice_class.updated` is emitted only after the user presses Calculate again and the AI request succeeds.
+- Vessel Fit reports are currently blocked in the host after `ice_class.updated`: the ice-class route intelligence remains visible, but the follow-on Vessel Fit report panel is not shown and generated PDFs exclude vessel-fit content.
 
 ## Widget Developer Tasks
 

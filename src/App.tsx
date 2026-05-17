@@ -17,6 +17,8 @@ import {
   ChevronRight,
   Info,
   ShieldCheck,
+  CheckCircle2,
+  XCircle,
   AlertTriangle,
   Snowflake,
   Calendar,
@@ -36,9 +38,6 @@ import { twMerge } from "tailwind-merge";
 import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useIceLayers } from "./features/iceLayers/useIceLayers";
-import { IceLayerToggle } from "./features/iceLayers/IceLayerToggle";
-import { IceMetadataPopup } from "./features/iceLayers/IceMetadataPopup";
 import {
   DndContext, 
   closestCenter,
@@ -57,11 +56,12 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { SavedRoutes } from "./components/SavedRoutes";
-import { SavedVessels, type Vessel } from "./components/SavedVessels";
+import { INITIAL_VESSELS, SavedVessels, type Vessel } from "./components/SavedVessels";
 import { VesselDetail } from "./components/VesselDetail";
 import { DateRangePicker } from "./components/DateRangePicker";
 import { dictionaries, type Language, type TranslationKey } from "./i18n";
 import { buildMapFitPoints, getMapFitPointSignature, type MapFitPoint } from "./features/routes/mapFitPoints";
+import ARC_ICE_CLASS_BUDGET_DELTA_MATRIX from "../docs/Arc_Ice_Class_Budget_Delta_Matrix.md?raw";
 import { requestIceClassAnalysis, type AnalysisResult } from "./features/iceAnalysis/iceAnalysisClient";
 
 /**
@@ -121,6 +121,45 @@ interface MapNavigationTarget {
   name?: string;
 }
 
+interface LegAnalysis {
+  from: string;
+  to: string;
+  fromPoint?: GeoPoint;
+  toPoint?: GeoPoint;
+  iceClass: string;
+  thickness: string;
+  risk: "LOW" | "MODERATE" | "HIGH";
+  integrity: number;
+  distance: number;
+  demandingSegment: string;
+  advisories: { type: "ice" | "seasonal" | "warning"; title: string; description: string }[];
+}
+
+interface AnalysisResult {
+  legs: LegAnalysis[];
+}
+
+interface VesselCompatibilityCheck {
+  area: string;
+  routeRequirement: string;
+  vesselCapability: string;
+  status: "pass" | "fail" | "review";
+  delta: string;
+  evidence: string;
+  recommendation: string;
+}
+
+interface VesselCompatibilityResult {
+  vesselName: string;
+  vesselClass: string;
+  routeRequiredClass: string;
+  overallStatus: "suitable" | "upgrade_required" | "review_required";
+  summary: string;
+  checks: VesselCompatibilityCheck[];
+  missingInputs: string[];
+  reportNotes: string[];
+}
+
 interface SeaRouteFeature {
   type: "Feature";
   geometry?: {
@@ -143,6 +182,34 @@ interface SeaRouteLeg {
   durationHours?: number;
 }
 
+interface OpenAIResponse {
+  output_text?: string;
+  output?: Array<{
+    content?: Array<{
+      text?: string;
+      type?: string;
+    }>;
+  }>;
+  error?: {
+    message?: string;
+  };
+}
+
+interface IceClassAIResponse {
+  legs: Array<{
+    iceClass: string;
+    thickness: string;
+    risk: "LOW" | "MODERATE" | "HIGH";
+    integrity: number;
+    demandingSegment: string;
+    advisories: Array<{
+      type: "ice" | "seasonal" | "warning";
+      title: string;
+      description: string;
+    }>;
+  }>;
+}
+
 type WidgetAction =
   | { type: "navigate"; lng: number; lat: number; zoom?: number }
   | { type: "add_waypoint"; lng: number; lat: number; name?: string }
@@ -158,6 +225,7 @@ const FURBOATS_WIDGET_ELEMENT_ID = "furboats-voice-agent-widget";
 const FURBOATS_WIDGET_URL = "https://furboats-openai-live-develop.denslov.workers.dev/widget/v1/furboats-voice-widget.js";
 const FURBOATS_WIDGET_BACKEND_URL = "https://furboats-openai-live-dev.denslov.workers.dev";
 const SEA_ROUTE_API_URL = "/api/sea-route";
+const ICE_ANALYSIS_SYSTEM_INSTRUCTION = "You are Ice Route AI, a polar maritime route analyst. Return conservative advisory ice-class estimates for each route leg. Use only the supplied route coordinates and dates. This is planning guidance, not an authoritative navigation order.";
 
 const SUPPORTED_WIDGET_ACTIONS = [
   "/action navigate lng,lat,zoom",
@@ -169,6 +237,169 @@ const SUPPORTED_WIDGET_ACTIONS = [
   "/action calculate_route",
   "/action generate_report",
 ] as const;
+
+const ICE_ANALYSIS_RESPONSE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["legs"],
+  properties: {
+    legs: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["iceClass", "thickness", "risk", "integrity", "demandingSegment", "advisories"],
+        properties: {
+          iceClass: {
+            type: "string",
+            description: "Recommended minimum ice class for this leg, for example Ice3, Arc4, Arc7, Arc9, or Open Water.",
+          },
+          thickness: {
+            type: "string",
+            description: "Estimated ice thickness label such as 0.4m, 1.2m, or Unknown.",
+          },
+          risk: {
+            type: "string",
+            enum: ["LOW", "MODERATE", "HIGH"],
+          },
+          integrity: {
+            type: "integer",
+            minimum: 0,
+            maximum: 100,
+            description: "Confidence/integrity score for this advisory estimate.",
+          },
+          demandingSegment: {
+            type: "string",
+            description: "Short description of the most demanding part of this leg.",
+          },
+          advisories: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["type", "title", "description"],
+              properties: {
+                type: {
+                  type: "string",
+                  enum: ["ice", "seasonal", "warning"],
+                },
+                title: {
+                  type: "string",
+                },
+                description: {
+                  type: "string",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+const VESSEL_COMPATIBILITY_RESPONSE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["vesselName", "vesselClass", "routeRequiredClass", "overallStatus", "summary", "checks", "missingInputs", "reportNotes"],
+  properties: {
+    vesselName: { type: "string" },
+    vesselClass: { type: "string" },
+    routeRequiredClass: { type: "string" },
+    overallStatus: {
+      type: "string",
+      enum: ["suitable", "upgrade_required", "review_required"],
+    },
+    summary: { type: "string" },
+    checks: {
+      type: "array",
+      minItems: 4,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["area", "routeRequirement", "vesselCapability", "status", "delta", "evidence", "recommendation"],
+        properties: {
+          area: { type: "string" },
+          routeRequirement: { type: "string" },
+          vesselCapability: { type: "string" },
+          status: {
+            type: "string",
+            enum: ["pass", "fail", "review"],
+          },
+          delta: { type: "string" },
+          evidence: { type: "string" },
+          recommendation: { type: "string" },
+        },
+      },
+    },
+    missingInputs: {
+      type: "array",
+      items: { type: "string" },
+    },
+    reportNotes: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+} as const;
+
+function getOpenAIResponseText(response: OpenAIResponse) {
+  if (response.output_text) {
+    return response.output_text;
+  }
+
+  return response.output
+    ?.flatMap((item) => item.content || [])
+    .map((content) => content.text)
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function parseOpenAIJson<T>(response: OpenAIResponse): T {
+  const text = getOpenAIResponseText(response);
+  if (!text) {
+    throw new Error("AI response did not include structured output.");
+  }
+
+  return JSON.parse(text) as T;
+}
+
+function buildIceAnalysisPrompt(waypoints: GeoPoint[], startDate: string, endDate: string) {
+  const legs = waypoints.slice(0, -1).map((from, index) => {
+    const to = waypoints[index + 1];
+    return {
+      index: index + 1,
+      from: {
+        name: from.name || `Waypoint ${index + 1}`,
+        lat: from.lat,
+        lng: from.lng,
+      },
+      to: {
+        name: to.name || `Waypoint ${index + 2}`,
+        lat: to.lat,
+        lng: to.lng,
+      },
+      distanceNm: calculateRouteDistance([from, to]),
+    };
+  });
+
+  return JSON.stringify({
+    task: "Estimate the worst expected ice load, required ice class, and route risk for every route leg across the supplied navigation period.",
+    outputRules: [
+      "Return exactly one legs item for each input leg, in the same order.",
+      "Use concise maritime wording suitable for UI cards.",
+      "The navigation period is mandatory. Use it as a primary factor because worst-case ice load depends strongly on season.",
+      "Estimate the worst expected ice condition within the entire startDate-to-endDate interval, not an average condition.",
+      "If public ice data is not available in this prompt, make a conservative planning estimate from latitude, season, navigation period, and segment length.",
+    ],
+    navigationWindow: {
+      startDate,
+      endDate,
+    },
+    legs,
+  });
+}
 
 function hasNavigationPeriod(startDate: string, endDate: string) {
   return Boolean(startDate && endDate);
@@ -203,6 +434,150 @@ async function requestSeaRoute(from: GeoPoint, to: GeoPoint, signal: AbortSignal
   }
 
   return data;
+}
+
+async function requestIceClassAnalysis(waypoints: GeoPoint[], startDate: string, endDate: string): Promise<AnalysisResult> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OpenAI API key is not configured. Add OPENAI_API_KEY to .env.local and restart the dev server.");
+  }
+
+  if (!hasNavigationPeriod(startDate, endDate)) {
+    throw new Error("Navigation period is required for ice-load calculation.");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+      instructions: ICE_ANALYSIS_SYSTEM_INSTRUCTION,
+      input: buildIceAnalysisPrompt(waypoints, startDate, endDate),
+      text: {
+        format: {
+          type: "json_schema",
+          name: "ice_route_analysis",
+          strict: true,
+          schema: ICE_ANALYSIS_RESPONSE_SCHEMA,
+        },
+      },
+    }),
+  });
+
+  const data = await response.json() as OpenAIResponse;
+  if (!response.ok) {
+    throw new Error(data.error?.message || "OpenAI ice-class analysis failed");
+  }
+
+  const parsed = parseOpenAIJson<IceClassAIResponse>(data);
+  const legs = waypoints.slice(0, -1).map((fromPoint, index): LegAnalysis => {
+    const toPoint = waypoints[index + 1];
+    const aiLeg = parsed.legs[index];
+
+    return {
+      from: fromPoint.name?.split(",")[0] || `Waypoint ${index + 1}`,
+      to: toPoint.name?.split(",")[0] || `Waypoint ${index + 2}`,
+      fromPoint,
+      toPoint,
+      iceClass: aiLeg?.iceClass || "Unknown",
+      thickness: aiLeg?.thickness || "Unknown",
+      risk: aiLeg?.risk || "MODERATE",
+      integrity: Math.max(0, Math.min(100, Number(aiLeg?.integrity ?? 50))),
+      distance: calculateRouteDistance([fromPoint, toPoint]),
+      demandingSegment: aiLeg?.demandingSegment || `Section ${index + 1}: ${fromPoint.name || "Waypoint"} to ${toPoint.name || "Waypoint"}`,
+      advisories: aiLeg?.advisories?.length ? aiLeg.advisories : [
+        {
+          type: "warning",
+          title: "Manual Review",
+          description: "AI response did not include advisories for this segment.",
+        },
+      ],
+    };
+  });
+
+  return { legs };
+}
+
+function buildVesselCompatibilityPrompt(vessel: Vessel, analysisResult: AnalysisResult, startDate: string, endDate: string, language: Language) {
+  return JSON.stringify({
+    task: "Compare the selected vessel ice capability against the calculated route ice-load requirements and identify fit/gaps.",
+    language,
+    rules: [
+      "Use the supplied expert matrix as the primary reference for Arc4/Arc5/Arc6 budget deltas and cautions.",
+      "Do not imply permission, class approval, certification guarantee, NSR permission, or safe navigation order.",
+      "If vessel data is incomplete, mark affected checks as review and list missing inputs.",
+      "Prefer practical vessel areas from the matrix: hull ice belt, shell plating, propulsion power, shafting/propeller, steering/rudder, sea-water systems, winterization, documentation/survey.",
+      "Return concise UI-ready wording.",
+    ],
+    selectedVessel: {
+      id: vessel.id,
+      name: vessel.name,
+      type: vessel.type,
+      iceClass: vessel.iceClass,
+      hull: vessel.hull,
+      draft: vessel.draft,
+      gt: vessel.gt,
+      power: vessel.power,
+      status: vessel.status,
+    },
+    navigationWindow: { startDate, endDate },
+    routeAnalysis: analysisResult.legs.map((leg, index) => ({
+      leg: index + 1,
+      from: leg.from,
+      to: leg.to,
+      distanceNm: leg.distance,
+      requiredIceClass: leg.iceClass,
+      thickness: leg.thickness,
+      risk: leg.risk,
+      demandingSegment: leg.demandingSegment,
+      advisories: leg.advisories,
+    })),
+    expertMatrix: ARC_ICE_CLASS_BUDGET_DELTA_MATRIX,
+  });
+}
+
+async function requestVesselCompatibility(
+  vessel: Vessel,
+  analysisResult: AnalysisResult,
+  startDate: string,
+  endDate: string,
+  language: Language
+): Promise<VesselCompatibilityResult> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OpenAI API key is not configured. Add OPENAI_API_KEY to .env.local and restart the dev server.");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+      instructions: "You are Ice Navigator Vessel Fit Analyst. Compare route ice requirements with selected vessel capability using the supplied Arc Ice Class Budget Delta Matrix. Return only structured JSON and keep all statements advisory.",
+      input: buildVesselCompatibilityPrompt(vessel, analysisResult, startDate, endDate, language),
+      text: {
+        format: {
+          type: "json_schema",
+          name: "vessel_compatibility",
+          strict: true,
+          schema: VESSEL_COMPATIBILITY_RESPONSE_SCHEMA,
+        },
+      },
+    }),
+  });
+
+  const data = await response.json() as OpenAIResponse;
+  if (!response.ok) {
+    throw new Error(data.error?.message || "OpenAI vessel compatibility request failed");
+  }
+
+  return parseOpenAIJson<VesselCompatibilityResult>(data);
 }
 
 function isValidCoordinate(lat: number, lng: number) {
@@ -463,7 +838,61 @@ function formatCoordinate(point?: { lat: number; lng: number }) {
   return `${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`;
 }
 
-function buildReportLines(waypoints: GeoPoint[], analysisResult: AnalysisResult, startDate: string, endDate: string) {
+function getCompatibilityStatusLabel(status: VesselCompatibilityResult["overallStatus"], t: (key: TranslationKey) => string) {
+  if (status === "suitable") {
+    return t("statusSuitable");
+  }
+
+  if (status === "upgrade_required") {
+    return t("statusUpgradeRequired");
+  }
+
+  return t("statusReviewRequired");
+}
+
+function getCheckStatusLabel(status: VesselCompatibilityCheck["status"], t: (key: TranslationKey) => string) {
+  if (status === "pass") {
+    return t("pass");
+  }
+
+  if (status === "fail") {
+    return t("fail");
+  }
+
+  return t("review");
+}
+
+function getCompatibilityStatusClass(status: VesselCompatibilityResult["overallStatus"]) {
+  if (status === "suitable") {
+    return "border-secondary/40 bg-secondary/10 text-secondary";
+  }
+
+  if (status === "upgrade_required") {
+    return "border-error/40 bg-error/10 text-error";
+  }
+
+  return "border-tertiary/40 bg-tertiary/10 text-tertiary";
+}
+
+function getCheckStatusClass(status: VesselCompatibilityCheck["status"]) {
+  if (status === "pass") {
+    return "text-secondary";
+  }
+
+  if (status === "fail") {
+    return "text-error";
+  }
+
+  return "text-tertiary";
+}
+
+function buildReportLines(
+  waypoints: GeoPoint[],
+  analysisResult: AnalysisResult,
+  startDate: string,
+  endDate: string,
+  compatibilityResult?: VesselCompatibilityResult | null
+) {
   const lines: string[] = [
     "ICE ROUTE FULL REPORT",
     `Generated: ${new Date().toLocaleString("en-GB")}`,
@@ -484,6 +913,36 @@ function buildReportLines(waypoints: GeoPoint[], analysisResult: AnalysisResult,
     });
     lines.push("");
   });
+
+  if (compatibilityResult) {
+    lines.push("");
+    lines.push("VESSEL FIT / ICE CLASS DELTA");
+    lines.push(`Vessel: ${normalizePdfText(compatibilityResult.vesselName)}`);
+    lines.push(`Vessel class: ${normalizePdfText(compatibilityResult.vesselClass)}`);
+    lines.push(`Route required class: ${normalizePdfText(compatibilityResult.routeRequiredClass)}`);
+    lines.push(`Overall status: ${normalizePdfText(compatibilityResult.overallStatus)}`);
+    lines.push(`Summary: ${normalizePdfText(compatibilityResult.summary)}`);
+    lines.push("");
+    lines.push("AREA | STATUS | ROUTE REQUIREMENT | VESSEL CAPABILITY | DELTA");
+    lines.push("-----|--------|-------------------|-------------------|------");
+    compatibilityResult.checks.forEach((check) => {
+      lines.push(`${normalizePdfText(check.area)} | ${check.status.toUpperCase()} | ${normalizePdfText(check.routeRequirement)} | ${normalizePdfText(check.vesselCapability)} | ${normalizePdfText(check.delta)}`);
+      lines.push(`    Recommendation: ${normalizePdfText(check.recommendation)}`);
+      lines.push(`    Evidence: ${normalizePdfText(check.evidence)}`);
+    });
+
+    if (compatibilityResult.missingInputs.length) {
+      lines.push("");
+      lines.push("Missing inputs:");
+      compatibilityResult.missingInputs.forEach((input) => lines.push(`- ${normalizePdfText(input)}`));
+    }
+
+    if (compatibilityResult.reportNotes.length) {
+      lines.push("");
+      lines.push("Report notes:");
+      compatibilityResult.reportNotes.forEach((note) => lines.push(`- ${normalizePdfText(note)}`));
+    }
+  }
 
   return lines.flatMap((line) => wrapPdfText(line, 104));
 }
@@ -631,10 +1090,17 @@ export default function App() {
   const [endDate, setEndDate] = useState<string>("");
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisRouteSignature, setAnalysisRouteSignature] = useState<string | null>(null);
+  const [compatibilityVesselId, setCompatibilityVesselId] = useState(INITIAL_VESSELS[0]?.id ?? "");
+  const [compatibilityResult, setCompatibilityResult] = useState<VesselCompatibilityResult | null>(null);
+  const [isCheckingCompatibility, setIsCheckingCompatibility] = useState(false);
   const [seaRouteLegs, setSeaRouteLegs] = useState<SeaRouteLeg[]>([]);
   const [isSeaRouting, setIsSeaRouting] = useState(false);
   const [seaRouteError, setSeaRouteError] = useState<string | null>(null);
   const mapFitPoints = useMemo(() => buildMapFitPoints(waypoints, seaRouteLegs), [waypoints, seaRouteLegs]);
+  const compatibilityVessel = useMemo(
+    () => INITIAL_VESSELS.find((vessel) => vessel.id === compatibilityVesselId) ?? INITIAL_VESSELS[0],
+    [compatibilityVesselId]
+  );
   const initialMapCenter = isMobileViewport ? MURMANSK_MAP_CENTER : DEFAULT_MAP_CENTER;
   const initialMapZoom = isMobileViewport ? 6 : 3;
   const t = useCallback((key: TranslationKey) => dictionaries[language][key], [language]);
@@ -668,6 +1134,7 @@ export default function App() {
     const result = await requestIceClassAnalysis(waypoints, startDate, endDate, seaRouteLegs);
     setAnalysisResult(result);
     setAnalysisRouteSignature(routeSignature);
+    setCompatibilityResult(null);
     setShowAnalysis(true);
     sendWidgetCommand("ice_class.updated", buildWidgetRouteContext(waypoints, result, startDate, endDate));
   }, [endDate, seaRouteLegs, sendWidgetCommand, startDate, waypoints]);
@@ -774,9 +1241,15 @@ export default function App() {
     return () => mediaQuery.removeEventListener("change", syncViewportMode);
   }, []);
 
+  useEffect(() => {
+    if (selectedVessel) {
+      setCompatibilityVesselId(selectedVessel.id);
+      setCompatibilityResult(null);
+    }
+  }, [selectedVessel]);
+
   const [mapLayer, setMapLayer] = useState<"satellite" | "standard">("standard");
   const [showLayers, setShowLayers] = useState(false);
-  const [showIceLayers, setShowIceLayers] = useState(false);
 
   // Auto-open sidebar when points are selected
   useEffect(() => {
@@ -789,6 +1262,7 @@ export default function App() {
     if (analysisRouteSignature && analysisRouteSignature !== getRouteSignature(waypoints)) {
       setAnalysisResult(null);
       setAnalysisRouteSignature(null);
+      setCompatibilityResult(null);
       setShowAnalysis(false);
     }
   }, [analysisRouteSignature, waypoints]);
@@ -919,6 +1393,7 @@ export default function App() {
 
     setIsAnalyzing(true);
     setShowAnalysis(false);
+    setCompatibilityResult(null);
 
     try {
       await runIceAnalysis();
@@ -932,6 +1407,35 @@ export default function App() {
     }
   }, [endDate, requestNavigationPeriodFromWidget, runIceAnalysis, sendWidgetCommand, startDate, t, waypoints.length]);
 
+  const handleCheckVesselCompatibility = useCallback(async () => {
+    if (!analysisResult || !compatibilityVessel) {
+      alert(t("vesselFitUnavailable"));
+      return;
+    }
+
+    setIsCheckingCompatibility(true);
+
+    try {
+      const result = await requestVesselCompatibility(compatibilityVessel, analysisResult, startDate, endDate, language);
+      setCompatibilityResult(result);
+      sendWidgetCommand("vessel_fit.updated", {
+        vessel: {
+          id: compatibilityVessel.id,
+          name: compatibilityVessel.name,
+          iceClass: compatibilityVessel.iceClass,
+        },
+        result,
+      });
+    } catch (error) {
+      console.error("Vessel compatibility check failed", error);
+      const message = error instanceof Error ? error.message : "Vessel compatibility check failed.";
+      sendWidgetCommand("vessel_fit.failed", { reason: message });
+      alert(message);
+    } finally {
+      setIsCheckingCompatibility(false);
+    }
+  }, [analysisResult, compatibilityVessel, endDate, language, sendWidgetCommand, startDate, t]);
+
   const handleGenerateFullReport = useCallback(() => {
     if (!analysisResult) {
       sendWidgetCommand("report.unavailable", {
@@ -940,15 +1444,16 @@ export default function App() {
       return;
     }
 
-    const lines = buildReportLines(waypoints, analysisResult, startDate, endDate);
+    const lines = buildReportLines(waypoints, analysisResult, startDate, endDate, compatibilityResult);
     const pdf = createPdfBlob(lines);
     const datestamp = new Date().toISOString().slice(0, 10);
     downloadBlob(pdf, `ice-route-report-${datestamp}.pdf`);
     sendWidgetCommand("report.generated", {
       filename: `ice-route-report-${datestamp}.pdf`,
       legCount: analysisResult.legs.length,
+      hasVesselFit: Boolean(compatibilityResult),
     });
-  }, [analysisResult, endDate, sendWidgetCommand, startDate, t, waypoints]);
+  }, [analysisResult, compatibilityResult, endDate, sendWidgetCommand, startDate, t, waypoints]);
 
   const executeWidgetAction = useCallback((action: WidgetAction) => {
     if (action.type === "navigate") {
@@ -1176,7 +1681,8 @@ export default function App() {
               animate={{ x: 0 }}
               exit={{ x: -320 }}
               className={cn(
-                "w-[340px] lg:w-[400px] border-r border-outline/20 bg-surface-low/50 backdrop-blur-md flex flex-col z-40 fixed md:static inset-y-0 left-0 pt-0 h-full"
+                "w-[340px] lg:w-[400px] border-r border-outline/20 bg-surface-low/50 backdrop-blur-md flex flex-col z-40 fixed md:static left-0 bottom-0 md:inset-y-0 md:h-full",
+                isMapFullscreen ? "top-0" : "top-16"
               )}
             >
               <div className="p-6 border-b border-outline/20">
@@ -1262,6 +1768,7 @@ export default function App() {
                               handleNavigationPeriodChange("", "");
                               setAnalysisResult(null);
                               setAnalysisRouteSignature(null);
+                              setCompatibilityResult(null);
                               setShowAnalysis(false);
                             }}
 	                            className="text-[10px] font-mono text-error hover:text-error/80 flex items-center gap-1 transition-colors"
@@ -1457,6 +1964,138 @@ export default function App() {
                             {t("generateFullReport")}
                          </button>
                       </div>
+
+                      <div className="technical-card p-4 rounded-none bg-surface-highest/10 border-outline/10 space-y-4">
+                        <TechnicalBorder />
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <ShieldCheck size={15} className="text-primary" />
+                              <h3 className="text-[10px] font-bold font-mono tracking-[0.2em] text-primary">{t("vesselFitTitle")}</h3>
+                            </div>
+                            <p className="text-[10px] leading-relaxed text-on-surface-variant font-mono tracking-wider">
+                              {t("vesselFitCta")}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[9px] font-bold font-mono text-on-surface-variant tracking-widest">{t("selectVessel")}</label>
+                          <select
+                            value={compatibilityVesselId}
+                            onChange={(event) => {
+                              setCompatibilityVesselId(event.target.value);
+                              setCompatibilityResult(null);
+                            }}
+                            className="w-full bg-background/60 border border-outline/30 px-3 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:border-primary"
+                          >
+                            {INITIAL_VESSELS.map((vessel) => (
+                              <option key={vessel.id} value={vessel.id}>
+                                {vessel.name} / {vessel.iceClass}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <button
+                          onClick={handleCheckVesselCompatibility}
+                          disabled={isCheckingCompatibility || !analysisResult}
+                          className={cn(
+                            "w-full py-3 border border-primary/40 bg-primary/10 text-primary text-[10px] font-bold font-mono tracking-widest hover:bg-primary/20 transition-colors uppercase flex items-center justify-center gap-2",
+                            (isCheckingCompatibility || !analysisResult) && "opacity-50 cursor-not-allowed"
+                          )}
+                        >
+                          {isCheckingCompatibility ? (
+                            <>
+                              <Loader2 size={14} className="animate-spin" />
+                              {t("checkingVesselFit")}
+                            </>
+                          ) : (
+                            <>
+                              <ShieldCheck size={14} />
+                              {t("checkVesselFit")}
+                            </>
+                          )}
+                        </button>
+
+                        {compatibilityResult && (
+                          <div className="space-y-4 pt-2 border-t border-outline/10">
+                            <div className="flex flex-col gap-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-[9px] font-bold font-mono text-on-surface-variant tracking-widest">{t("overallStatus")}</span>
+                                <span className={cn(
+                                  "px-2 py-1 border text-[9px] font-bold font-mono tracking-widest",
+                                  getCompatibilityStatusClass(compatibilityResult.overallStatus)
+                                )}>
+                                  {getCompatibilityStatusLabel(compatibilityResult.overallStatus, t)}
+                                </span>
+                              </div>
+                              <p className="text-xs leading-relaxed text-on-surface">{compatibilityResult.summary}</p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="border border-outline/10 bg-background/30 p-3">
+                                  <p className="text-[8px] font-bold font-mono text-on-surface-variant tracking-widest mb-1">{t("routeRequiredClass")}</p>
+                                  <p className="text-sm font-bold text-primary">{compatibilityResult.routeRequiredClass}</p>
+                                </div>
+                                <div className="border border-outline/10 bg-background/30 p-3">
+                                  <p className="text-[8px] font-bold font-mono text-on-surface-variant tracking-widest mb-1">{t("selectedVesselClass")}</p>
+                                  <p className="text-sm font-bold text-secondary">{compatibilityResult.vesselClass}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              {compatibilityResult.checks.map((check, index) => (
+                                <div key={`${check.area}-${index}`} className="border border-outline/10 bg-background/30 p-3 space-y-2">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <p className="text-[10px] font-bold font-mono text-on-surface tracking-widest truncate">{check.area}</p>
+                                      <p className="text-[9px] text-on-surface-variant leading-relaxed">{check.delta}</p>
+                                    </div>
+                                    <div className={cn("flex items-center gap-1 text-[9px] font-bold font-mono", getCheckStatusClass(check.status))}>
+                                      {check.status === "pass" && <CheckCircle2 size={14} />}
+                                      {check.status === "fail" && <XCircle size={14} />}
+                                      {check.status === "review" && <AlertTriangle size={14} />}
+                                      {getCheckStatusLabel(check.status, t)}
+                                    </div>
+                                  </div>
+                                  <div className="grid grid-cols-1 gap-2 text-[10px] leading-relaxed text-on-surface-variant">
+                                    <p><span className="font-bold text-primary">{t("fitRouteRequirement")}:</span> {check.routeRequirement}</p>
+                                    <p><span className="font-bold text-secondary">{t("fitVesselCapability")}:</span> {check.vesselCapability}</p>
+                                    <p><span className="font-bold text-tertiary">{t("fitRecommendation")}:</span> {check.recommendation}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {(compatibilityResult.missingInputs.length > 0 || compatibilityResult.reportNotes.length > 0) && (
+                              <div className="space-y-3 text-[10px] text-on-surface-variant leading-relaxed">
+                                {compatibilityResult.missingInputs.length > 0 && (
+                                  <div>
+                                    <p className="font-bold font-mono text-tertiary tracking-widest mb-1">{t("missingInputs")}</p>
+                                    <ul className="space-y-1">
+                                      {compatibilityResult.missingInputs.map((item, index) => (
+                                        <li key={`${item}-${index}`}>- {item}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                {compatibilityResult.reportNotes.length > 0 && (
+                                  <div>
+                                    <p className="font-bold font-mono text-on-surface tracking-widest mb-1">{t("reportNotes")}</p>
+                                    <ul className="space-y-1">
+                                      {compatibilityResult.reportNotes.map((item, index) => (
+                                        <li key={`${item}-${index}`}>- {item}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            <p className="text-[9px] leading-relaxed text-outline">{t("vesselFitDisclaimer")}</p>
+                          </div>
+                        )}
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1534,20 +2173,13 @@ export default function App() {
                   }}
                   onCenter={() => waypoints.length > 0 && setFlyToPoint(waypoints[0])} 
                   onToggleLayers={() => setShowLayers(!showLayers)}
-                  onToggleIceLayers={() => setShowIceLayers(!showIceLayers)}
                   labels={{
                     fullscreen: t("fullscreen"),
                     layers: t("layers"),
-                    iceLayers: t("iceLayers"),
                     centerOnVessel: t("centerOnVessel"),
                     zoomIn: t("zoomIn"),
                     zoomOut: t("zoomOut"),
                   }}
-                />
-
-                <IceLayerManager 
-                  showIceToggles={showIceLayers} 
-                  setShowIceToggles={setShowIceLayers} 
                 />
 
                 {/* Layers Selection Popup */}
@@ -1900,16 +2532,14 @@ function WaypointBoundsHandler({ waypoints, fitPoints }: { waypoints: GeoPoint[]
   return null;
 }
 
-function MapControls({ isFullscreen, onToggleFullscreen, onCenter, onToggleLayers, onToggleIceLayers, labels }: {
+function MapControls({ isFullscreen, onToggleFullscreen, onCenter, onToggleLayers, labels }: {
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
   onCenter: () => void;
   onToggleLayers: () => void;
-  onToggleIceLayers: () => void;
   labels?: {
     fullscreen: string;
     layers: string;
-    iceLayers: string;
     centerOnVessel: string;
     zoomIn: string;
     zoomOut: string;
@@ -1946,13 +2576,6 @@ function MapControls({ isFullscreen, onToggleFullscreen, onCenter, onToggleLayer
           >
             <Layers size={18} />
           </button>
-          <button 
-            title={labels?.iceLayers || "Ice Layers"}
-            onClick={onToggleIceLayers}
-            className="p-3 text-on-surface hover:text-primary transition-colors focus:outline-none"
-          >
-            <Snowflake size={18} />
-          </button>
         </div>
         
         <button 
@@ -1987,52 +2610,4 @@ function MapEvents({
     },
   });
   return null;
-}
-
-function IceLayerManager({ showIceToggles, setShowIceToggles }: { showIceToggles: boolean, setShowIceToggles: (v: boolean) => void }) {
-  const {
-    layers,
-    visibleLayerIds,
-    loadingLayerIds,
-    errorByLayerId,
-    selectedIceFeature,
-    toggleLayer,
-    setLayerOpacity,
-    clearSelectedIceFeature
-  } = useIceLayers();
-
-  return (
-    <>
-      {showIceToggles && (
-        <div 
-          className="leaflet-top leaflet-right" 
-          style={{ marginTop: "160px", marginRight: "80px" }}
-        >
-          <div className="leaflet-control" onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
-             <IceLayerToggle 
-                layers={layers}
-                visibleLayerIds={visibleLayerIds}
-                onToggleLayer={toggleLayer}
-                onOpacityChange={setLayerOpacity}
-                loadingLayerIds={loadingLayerIds}
-                errorByLayerId={errorByLayerId}
-             />
-          </div>
-        </div>
-      )}
-      
-      <AnimatePresence>
-        {selectedIceFeature && (
-          <div className="absolute top-0 right-0 z-[1000] h-full pointer-events-none">
-            <div className="pointer-events-auto">
-              <IceMetadataPopup 
-                metadata={selectedIceFeature}
-                onClose={clearSelectedIceFeature}
-              />
-            </div>
-          </div>
-        )}
-      </AnimatePresence>
-    </>
-  );
 }

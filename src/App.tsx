@@ -1094,9 +1094,6 @@ export default function App() {
         };
         setWaypoints(prev => [...prev, point]);
         setNewWaypointSearch("");
-        if (waypoints.length === 0) {
-          setFlyToPoint(point);
-        }
       }
     } catch (error) {
       console.error("Geocoding failed", error);
@@ -1117,14 +1114,20 @@ export default function App() {
   };
 
   const addWaypointAtPos = async (lat: number, lng: number) => {
-    const name = await handleReverseGeocode(lat, lng);
+    const id = Math.random().toString(36).substr(2, 9);
+    const fallbackName = `Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}`;
     const newPoint: GeoPoint = {
-      id: Math.random().toString(36).substr(2, 9),
+      id,
       lat,
       lng,
-      name
+      name: fallbackName
     };
     setWaypoints(prev => [...prev, newPoint]);
+
+    const name = await handleReverseGeocode(lat, lng);
+    setWaypoints(prev => prev.map(point => (
+      point.id === id ? { ...point, name } : point
+    )));
   };
 
   const removeWaypoint = (id: string) => {
@@ -1218,9 +1221,6 @@ export default function App() {
         setWaypoints(prev => [...prev, waypoint]);
       }
 
-      if (waypoints.length === 0) {
-        setFlyToPoint({ ...waypoint, zoom: 8 });
-      }
       setActiveTab("command");
       return;
     }
@@ -1788,7 +1788,6 @@ export default function App() {
                 />
                 <MapEvents 
                   onAddWaypoint={addWaypointAtPos}
-                  shouldFlyToNewWaypoint={waypoints.length === 0}
                 />
                 {flyToPoint && <FlyToHandler point={flyToPoint} onComplete={() => setFlyToPoint(null)} />}
                 <WaypointBoundsHandler waypoints={waypoints} />
@@ -2198,27 +2197,40 @@ function WaypointBoundsHandler({ waypoints }: { waypoints: GeoPoint[] }) {
       return;
     }
 
-    previousRouteSignatureRef.current = routeSignature;
-
-    if (waypoints.length < 2) {
+    if (waypoints.length === 0) {
+      previousRouteSignatureRef.current = routeSignature;
       return;
     }
 
-    const bounds = L.latLngBounds(
-      waypoints.map((point) => [point.lat, point.lng] as L.LatLngTuple)
-    );
+    const animationFrame = window.requestAnimationFrame(() => {
+      map.stop();
+      map.invalidateSize({ animate: false });
 
-    if (!bounds.isValid()) {
-      return;
-    }
+      if (waypoints.length === 1) {
+        const [point] = waypoints;
+        map.setView([point.lat, point.lng], 8, { animate: false });
+        previousRouteSignatureRef.current = routeSignature;
+        return;
+      }
 
-    map.stop();
-    map.fitBounds(bounds, {
-      animate: true,
-      duration: 0.75,
-      maxZoom: 8,
-      padding: [80, 80],
+      const bounds = L.latLngBounds(
+        waypoints.map((point) => [point.lat, point.lng] as L.LatLngTuple)
+      );
+
+      if (!bounds.isValid()) {
+        return;
+      }
+
+      map.fitBounds(bounds, {
+        animate: false,
+        maxZoom: 8,
+        paddingTopLeft: [96, 96],
+        paddingBottomRight: [180, 170],
+      });
+      previousRouteSignatureRef.current = routeSignature;
     });
+
+    return () => window.cancelAnimationFrame(animationFrame);
   }, [map, waypoints]);
 
   return null;
@@ -2293,18 +2305,12 @@ function MapControls({ onCenter, onToggleLayers, onToggleIceLayers, labels }: {
 
 function MapEvents({ 
   onAddWaypoint,
-  shouldFlyToNewWaypoint,
 }: { 
   onAddWaypoint: (lat: number, lng: number) => void;
-  shouldFlyToNewWaypoint: boolean;
 }) {
-  const map = useMap();
   useMapEvents({
     click(e) {
       onAddWaypoint(e.latlng.lat, e.latlng.lng);
-      if (shouldFlyToNewWaypoint) {
-        map.flyTo([e.latlng.lat, e.latlng.lng], map.getZoom(), { animate: true });
-      }
     },
   });
   return null;

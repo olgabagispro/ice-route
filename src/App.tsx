@@ -192,6 +192,7 @@ const FURBOATS_WIDGET_URL = "https://furboats-openai-live-develop.denslov.worker
 const FURBOATS_WIDGET_BACKEND_URL = "https://furboats-openai-live-dev.denslov.workers.dev";
 const SEA_ROUTE_API_URL = "/api/sea-route";
 const VESSEL_FIT_REPORTS_ENABLED = false;
+const VESSEL_FIT_BLOCK_VERSION = "2026-05-17.2";
 
 const SUPPORTED_WIDGET_ACTIONS = [
   "/action navigate lng,lat,zoom",
@@ -1293,6 +1294,8 @@ export default function App() {
       filename: `ice-route-report-${datestamp}.pdf`,
       legCount: analysisResult.legs.length,
       hasVesselFit: Boolean(reportCompatibilityResult),
+      vesselFitReportsEnabled: VESSEL_FIT_REPORTS_ENABLED,
+      vesselFitBlockVersion: VESSEL_FIT_BLOCK_VERSION,
     });
   }, [analysisResult, compatibilityResult, endDate, sendWidgetCommand, startDate, t, waypoints]);
 

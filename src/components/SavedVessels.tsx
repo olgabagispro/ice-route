@@ -88,7 +88,7 @@ export function SavedVessels({ onSelectVessel, t }: SavedVesselsProps) {
               {t("savedVesselsDescription")}
             </p>
           </div>
-          <button className="px-8 py-3 bg-secondary text-background font-bold font-mono text-[10px] tracking-widest hover:bg-secondary-dim transition-all flex items-center gap-2 shadow-lg shadow-secondary/10">
+          <button className="px-8 py-3 bg-primary text-background font-bold font-mono text-[10px] tracking-widest hover:bg-primary-dim transition-all flex items-center gap-2 shadow-lg shadow-primary/10">
             <PlusCircle size={16} /> {t("registerNewVessel")}
           </button>
         </div>
@@ -110,7 +110,7 @@ export function SavedVessels({ onSelectVessel, t }: SavedVesselsProps) {
               <Filter size={18} />
             </button>
             <div className="flex bg-surface-highest/10 border border-outline/20 p-1">
-              <button className="p-3 bg-secondary text-background">
+              <button className="p-3 bg-primary text-background">
                 <LayoutGrid size={18} />
               </button>
               <button className="p-3 text-on-surface-variant hover:text-primary transition-colors">

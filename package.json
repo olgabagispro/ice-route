@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "node --test"
+    "test": "node --import tsx --test"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

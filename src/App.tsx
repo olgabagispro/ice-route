@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { 
   Anchor, 
   Map as MapIcon, 
@@ -64,6 +64,7 @@ import { SavedVessels, type Vessel } from "./components/SavedVessels";
 import { VesselDetail } from "./components/VesselDetail";
 import { DateRangePicker } from "./components/DateRangePicker";
 import { dictionaries, type Language, type TranslationKey } from "./i18n";
+import { buildMapFitPoints, getMapFitPointSignature, type MapFitPoint } from "./features/routes/mapFitPoints";
 
 /**
  * Utility for Tailwind class merging
@@ -144,6 +145,8 @@ interface SeaRouteFeature {
 
 interface SeaRouteLeg {
   legIndex: number;
+  from: MapFitPoint;
+  to: MapFitPoint;
   coordinates: [number, number][];
   lengthKm?: number;
   durationHours?: number;
@@ -883,6 +886,7 @@ export default function App() {
   const [seaRouteLegs, setSeaRouteLegs] = useState<SeaRouteLeg[]>([]);
   const [isSeaRouting, setIsSeaRouting] = useState(false);
   const [seaRouteError, setSeaRouteError] = useState<string | null>(null);
+  const mapFitPoints = useMemo(() => buildMapFitPoints(waypoints, seaRouteLegs), [waypoints, seaRouteLegs]);
   const t = useCallback((key: TranslationKey) => dictionaries[language][key], [language]);
 
   const sendWidgetCommand = useCallback((command: string, payload: Record<string, unknown>) => {
@@ -1043,6 +1047,8 @@ export default function App() {
           const feature = await requestSeaRoute(fromPoint, waypoints[index + 1], controller.signal);
           return {
             legIndex: index,
+            from: { lat: fromPoint.lat, lng: fromPoint.lng },
+            to: { lat: waypoints[index + 1].lat, lng: waypoints[index + 1].lng },
             coordinates: feature.geometry!.coordinates!,
             lengthKm: feature.properties?.length,
             durationHours: feature.properties?.duration_hours,
@@ -1788,7 +1794,7 @@ export default function App() {
                   onAddWaypoint={addWaypointAtPos}
                 />
                 {flyToPoint && <FlyToHandler point={flyToPoint} onComplete={() => setFlyToPoint(null)} />}
-                <WaypointBoundsHandler waypoints={waypoints} />
+                <WaypointBoundsHandler waypoints={waypoints} fitPoints={mapFitPoints} />
                 
                 <MapControls 
                   onCenter={() => waypoints.length > 0 && setFlyToPoint(waypoints[0])} 
@@ -2128,12 +2134,12 @@ function FlyToHandler({ point, onComplete }: { point: MapNavigationTarget; onCom
   return null;
 }
 
-function WaypointBoundsHandler({ waypoints }: { waypoints: GeoPoint[] }) {
+function WaypointBoundsHandler({ waypoints, fitPoints }: { waypoints: GeoPoint[]; fitPoints: MapFitPoint[] }) {
   const map = useMap();
   const previousRouteSignatureRef = useRef("");
 
   useEffect(() => {
-    const routeSignature = getRouteSignature(waypoints);
+    const routeSignature = getMapFitPointSignature(fitPoints);
 
     if (routeSignature === previousRouteSignatureRef.current) {
       return;
@@ -2155,8 +2161,9 @@ function WaypointBoundsHandler({ waypoints }: { waypoints: GeoPoint[] }) {
         return;
       }
 
+      const boundsPoints = fitPoints.length > 0 ? fitPoints : waypoints;
       const bounds = L.latLngBounds(
-        waypoints.map((point) => [point.lat, point.lng] as L.LatLngTuple)
+        boundsPoints.map((point) => [point.lat, point.lng] as L.LatLngTuple)
       );
 
       if (!bounds.isValid()) {
@@ -2173,7 +2180,7 @@ function WaypointBoundsHandler({ waypoints }: { waypoints: GeoPoint[] }) {
     });
 
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [map, waypoints]);
+  }, [fitPoints, map, waypoints]);
 
   return null;
 }

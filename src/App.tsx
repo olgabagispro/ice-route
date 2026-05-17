@@ -200,7 +200,7 @@ type WidgetAction =
 
 const FURBOATS_WIDGET_SCRIPT_ID = "furboats-voice-widget-script";
 const FURBOATS_WIDGET_ELEMENT_ID = "furboats-voice-agent-widget";
-const FURBOATS_WIDGET_URL = "https://furboats-openai-live-dev.denslov.workers.dev/widget/v1/furboats-voice-widget.js";
+const FURBOATS_WIDGET_URL = "https://furboats-openai-live-develop.denslov.workers.dev/widget/v1/furboats-voice-widget.js";
 const FURBOATS_WIDGET_BACKEND_URL = "https://furboats-openai-live-dev.denslov.workers.dev";
 const SEA_ROUTE_API_URL = "/api/sea-route";
 const ICE_ANALYSIS_SYSTEM_INSTRUCTION = "You are Ice Route AI, a polar maritime route analyst. Return conservative advisory ice-class estimates for each route leg. Use only the supplied route coordinates and dates. This is planning guidance, not an authoritative navigation order.";
@@ -1425,39 +1425,17 @@ export default function App() {
               </div>
 
               <div className="flex-1 overflow-y-auto custom-scrollbar p-0 space-y-0 pb-32 md:pb-8">
-                {/* Main Navigation links */}
-                <nav className="flex flex-col mb-6 border-b border-outline/10">
-                  <button
-                    onClick={() => setActiveTab("command")}
-                    className={cn(
-                      "px-6 py-4 flex items-center gap-4 transition-all border-l-4",
-                      activeTab === "command" ? "border-secondary bg-surface-highest/20 text-secondary" : "border-transparent text-on-surface-variant hover:bg-surface-highest/10 hover:text-on-surface"
-                    )}
-                  >
-                    <Activity size={18} />
-                    <span className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase">{t("missionCommand")}</span>
-                  </button>
-                  <button
-                    onClick={() => { setActiveTab("fleet"); setSelectedVessel(null); }}
-                    className={cn(
-                      "px-6 py-4 flex items-center gap-4 transition-all border-l-4",
-                      activeTab === "fleet" ? "border-secondary bg-surface-highest/20 text-secondary" : "border-transparent text-on-surface-variant hover:bg-surface-highest/10 hover:text-on-surface"
-                    )}
-                  >
-                    <Ship size={18} />
-                    <span className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase">{t("fleetArchive")}</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("archive")}
-                    className={cn(
-                      "px-6 py-4 flex items-center gap-4 transition-all border-l-4",
-                      activeTab === "archive" ? "border-secondary bg-surface-highest/20 text-secondary" : "border-transparent text-on-surface-variant hover:bg-surface-highest/10 hover:text-on-surface"
-                    )}
-                  >
-                    <Bookmark size={18} />
-                    <span className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase">{t("savedRoutes")}</span>
-                  </button>
-                </nav>
+                {activeTab === "command" && (
+                  <div className="px-6 pt-6 pb-2 space-y-2">
+                    <div className="flex items-center gap-3">
+                      <Activity size={18} className="text-secondary" />
+                      <h3 className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase text-secondary">{t("calculateIceClass")}</h3>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-on-surface-variant font-mono uppercase tracking-wider">
+                      {t("iceLoadCta")}
+                    </p>
+                  </div>
+                )}
 
                 <div className="px-6 space-y-8 uppercase">
                   {/* Mission Parameters - Only show on Command/Routing tabs */}

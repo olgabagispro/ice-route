@@ -1,6 +1,6 @@
 export const dictionaries = {
   en: {
-    appName: "ICE ROUTE",
+    appName: "ICE NAVIGATOR",
     proVersion: "PRO version",
     signalOptimal: "SIGNAL: OPTIMAL",
     command: "COMMAND",
@@ -10,6 +10,7 @@ export const dictionaries = {
     savedRoutes: "SAVED ROUTES",
     commandPanel: "Command Panel",
     vesselReadiness: "Vessel Alpha-7 | Polar Class Readiness",
+    iceLoadCta: "Add route points, set the navigation period, then calculate ice load.",
     missionCommand: "MISSION COMMAND",
     fleetArchive: "FLEET ARCHIVE",
     calculateIceClass: "CALCULATE ICE CLASS",
@@ -121,7 +122,7 @@ export const dictionaries = {
     predictedEmissionsProfile: "PREDICTED EMISSIONS PROFILE",
   },
   ru: {
-    appName: "ICE ROUTE",
+    appName: "ICE NAVIGATOR",
     proVersion: "PRO версия",
     signalOptimal: "СИГНАЛ: ОПТИМАЛЬНЫЙ",
     command: "КОМАНДЫ",
@@ -131,6 +132,7 @@ export const dictionaries = {
     savedRoutes: "МАРШРУТЫ",
     commandPanel: "Панель управления",
     vesselReadiness: "Судно Alpha-7 | Готовность к полярному классу",
+    iceLoadCta: "Добавьте точки маршрута, задайте период навигации и рассчитайте ледовую нагрузку.",
     missionCommand: "УПРАВЛЕНИЕ МАРШРУТОМ",
     fleetArchive: "АРХИВ ФЛОТА",
     calculateIceClass: "РАССЧИТАТЬ ЛЕДОВЫЙ КЛАСС",
@@ -141,7 +143,7 @@ export const dictionaries = {
     addMissionWaypoint: "ДОБАВИТЬ ТОЧКУ",
     waypointSearchPlaceholder: "Порт или координаты...",
     noWaypoints: "Точки не заданы. Нажмите на карту, чтобы добавить участки.",
-    navigationPeriod: "ПЕРИОД ПЛАВАНИЯ",
+    navigationPeriod: "ПЕРИОД НАВИГАЦИИ",
     navigationWindow: "НАВИГАЦИОННОЕ ОКНО",
     navigationWindowHelp: "Выберите две точки на морской карте или введите названия портов, чтобы запустить расчет ледового класса.",
     routeIntelligence: "Анализ маршрута",

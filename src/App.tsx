@@ -4,8 +4,6 @@ import {
   Map as MapIcon, 
   Navigation, 
   Settings, 
-  Bell, 
-  User, 
   Route, 
   Activity, 
   History,
@@ -20,7 +18,6 @@ import {
   Info,
   ShieldCheck,
   AlertTriangle,
-  Zap,
   Snowflake,
   Calendar,
   Download,
@@ -783,13 +780,13 @@ function positionFurboatsWidget(widget: HTMLElement) {
   const style = document.createElement("style");
   style.textContent = `
     .root {
-      bottom: 104px;
+      bottom: 24px;
       right: 24px;
     }
 
     @media (max-width: 767px) {
       .root {
-        bottom: 88px;
+        bottom: 20px;
         right: 16px;
       }
     }
@@ -812,9 +809,8 @@ const MobileNav = ({ activeTab, setActiveTab, t }: { activeTab: string; setActiv
   const tabs = [
     { id: "command", icon: Activity, label: t("command") },
     { id: "fleet", icon: Ship, label: t("fleet") },
-    { id: "routing", icon: Route, label: t("missionRouting") },
     { id: "data", icon: Info, label: t("technicalData") },
-    { id: "archive", icon: Bookmark, label: t("savedRoutes") },
+    { id: "archive", icon: Route, label: t("savedRoutes") },
   ];
 
   return (
@@ -849,6 +845,7 @@ export default function App() {
   const [selectedVessel, setSelectedVessel] = useState<Vessel | null>(null);
   const [isMobileViewport, setIsMobileViewport] = useState(getIsMobileViewport);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => !getIsMobileViewport());
+  const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [language, setLanguage] = useState<Language>(getInitialLanguage);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -998,6 +995,7 @@ export default function App() {
       const isMobile = mediaQuery.matches;
       setIsMobileViewport(isMobile);
       setIsSidebarOpen(!isMobile);
+      setIsMapFullscreen(false);
     };
 
     syncViewportMode();
@@ -1349,7 +1347,8 @@ export default function App() {
   return (
     <div className={cn("h-screen flex flex-col bg-background selection:bg-primary/30", isDarkMode ? "dark" : "")}>
       {/* Top Header */}
-      <header className="h-16 border-b border-outline/20 bg-surface/50 backdrop-blur-xl hidden md:flex items-center justify-between px-6 z-50 fixed top-0 w-full">
+      {!isMapFullscreen && (
+      <header className="h-16 border-b border-outline/20 bg-surface/50 backdrop-blur-xl flex items-center justify-between px-4 md:px-6 z-50 fixed top-0 w-full">
         <div className="flex items-center gap-4">
           <button 
             className="md:hidden text-on-surface-variant hover:text-on-surface p-2"
@@ -1393,23 +1392,11 @@ export default function App() {
               </button>
             ))}
           </div>
-          <button 
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            className="p-2 text-on-surface-variant hover:text-primary rounded-full transition-colors"
-          >
-            {isDarkMode ? <Zap size={18} fill="currentColor" /> : <Snowflake size={18} />}
-          </button>
-          <button className="p-2 text-on-surface-variant hover:text-primary rounded-full relative">
-            <Bell size={18} />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-secondary rounded-full border-2 border-surface" />
-          </button>
-          <div className="w-8 h-8 rounded-none bg-surface-highest border border-outline/20 flex items-center justify-center overflow-hidden">
-             <User size={18} className="text-primary" />
-          </div>
         </div>
       </header>
+      )}
 
-      <div className="flex flex-1 md:pt-16 overflow-hidden">
+      <div className={cn("flex flex-1 overflow-hidden", !isMapFullscreen && "pt-16")}>
         {/* Sidebar */}
         <AnimatePresence>
           {(!isMobileViewport || isSidebarOpen) && (
@@ -1440,7 +1427,7 @@ export default function App() {
               <div className="flex-1 overflow-y-auto custom-scrollbar p-0 space-y-0 pb-32 md:pb-8">
                 {/* Main Navigation links */}
                 <nav className="flex flex-col mb-6 border-b border-outline/10">
-                  <button 
+                  <button
                     onClick={() => setActiveTab("command")}
                     className={cn(
                       "px-6 py-4 flex items-center gap-4 transition-all border-l-4",
@@ -1450,7 +1437,7 @@ export default function App() {
                     <Activity size={18} />
                     <span className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase">{t("missionCommand")}</span>
                   </button>
-                  <button 
+                  <button
                     onClick={() => { setActiveTab("fleet"); setSelectedVessel(null); }}
                     className={cn(
                       "px-6 py-4 flex items-center gap-4 transition-all border-l-4",
@@ -1460,7 +1447,7 @@ export default function App() {
                     <Ship size={18} />
                     <span className="text-[10px] font-bold font-mono tracking-[0.2em] uppercase">{t("fleetArchive")}</span>
                   </button>
-                  <button 
+                  <button
                     onClick={() => setActiveTab("archive")}
                     className={cn(
                       "px-6 py-4 flex items-center gap-4 transition-all border-l-4",
@@ -1791,6 +1778,11 @@ export default function App() {
                 <WaypointBoundsHandler waypoints={waypoints} fitPoints={mapFitPoints} />
                 
                 <MapControls 
+                  isFullscreen={isMapFullscreen}
+                  onToggleFullscreen={() => {
+                    setIsMapFullscreen((current) => !current);
+                    setIsSidebarOpen(false);
+                  }}
                   onCenter={() => waypoints.length > 0 && setFlyToPoint(waypoints[0])} 
                   onToggleLayers={() => setShowLayers(!showLayers)}
                   onToggleIceLayers={() => setShowIceLayers(!showIceLayers)}
@@ -2159,7 +2151,9 @@ function WaypointBoundsHandler({ waypoints, fitPoints }: { waypoints: GeoPoint[]
   return null;
 }
 
-function MapControls({ onCenter, onToggleLayers, onToggleIceLayers, labels }: {
+function MapControls({ isFullscreen, onToggleFullscreen, onCenter, onToggleLayers, onToggleIceLayers, labels }: {
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
   onCenter: () => void;
   onToggleLayers: () => void;
   onToggleIceLayers: () => void;
@@ -2186,7 +2180,14 @@ function MapControls({ onCenter, onToggleLayers, onToggleIceLayers, labels }: {
     <div ref={containerRef} className="leaflet-top leaflet-right" style={{ marginTop: "24px", marginRight: "24px" }}>
       <div className="leaflet-control flex flex-col gap-3 pointer-events-auto">
         <div className="flex flex-col bg-surface border border-outline/20 shadow-2xl">
-          <button title={labels?.fullscreen || "Fullscreen"} className="p-3 text-on-surface hover:text-primary transition-colors border-b border-outline/20 focus:outline-none">
+          <button
+            title={labels?.fullscreen || "Fullscreen"}
+            onClick={onToggleFullscreen}
+            className={cn(
+              "p-3 text-on-surface hover:text-primary transition-colors border-b border-outline/20 focus:outline-none",
+              isFullscreen && "text-primary"
+            )}
+          >
             <Maximize2 size={18} />
           </button>
           <button 

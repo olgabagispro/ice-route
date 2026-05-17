@@ -86,6 +86,17 @@ function getInitialLanguage(): Language {
   return window.navigator.language.toLowerCase().startsWith("ru") ? "ru" : "en";
 }
 
+function getIsMobileViewport() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.matchMedia("(max-width: 767px)").matches;
+}
+
+const DEFAULT_MAP_CENTER: [number, number] = [65, -20];
+const MURMANSK_MAP_CENTER: [number, number] = [68.9707, 33.0749];
+
 // Fix Leaflet Default Icon issue
 // @ts-ignore
 delete L.Icon.Default.prototype._getIconUrl;
@@ -836,7 +847,8 @@ export default function App() {
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [activeTab, setActiveTab] = useState("command");
   const [selectedVessel, setSelectedVessel] = useState<Vessel | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isMobileViewport, setIsMobileViewport] = useState(getIsMobileViewport);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => !getIsMobileViewport());
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [language, setLanguage] = useState<Language>(getInitialLanguage);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -855,6 +867,8 @@ export default function App() {
   const [isSeaRouting, setIsSeaRouting] = useState(false);
   const [seaRouteError, setSeaRouteError] = useState<string | null>(null);
   const mapFitPoints = useMemo(() => buildMapFitPoints(waypoints, seaRouteLegs), [waypoints, seaRouteLegs]);
+  const initialMapCenter = isMobileViewport ? MURMANSK_MAP_CENTER : DEFAULT_MAP_CENTER;
+  const initialMapZoom = isMobileViewport ? 6 : 3;
   const t = useCallback((key: TranslationKey) => dictionaries[language][key], [language]);
 
   const sendWidgetCommand = useCallback((command: string, payload: Record<string, unknown>) => {
@@ -978,16 +992,29 @@ export default function App() {
     }
   }, [isDarkMode]);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const syncViewportMode = () => {
+      const isMobile = mediaQuery.matches;
+      setIsMobileViewport(isMobile);
+      setIsSidebarOpen(!isMobile);
+    };
+
+    syncViewportMode();
+    mediaQuery.addEventListener("change", syncViewportMode);
+    return () => mediaQuery.removeEventListener("change", syncViewportMode);
+  }, []);
+
   const [mapLayer, setMapLayer] = useState<"satellite" | "standard">("standard");
   const [showLayers, setShowLayers] = useState(false);
   const [showIceLayers, setShowIceLayers] = useState(false);
 
   // Auto-open sidebar when points are selected
   useEffect(() => {
-    if (waypoints.length >= 2) {
+    if (!isMobileViewport && waypoints.length >= 2) {
       setIsSidebarOpen(true);
     }
-  }, [waypoints.length]);
+  }, [isMobileViewport, waypoints.length]);
 
   useEffect(() => {
     if (analysisRouteSignature && analysisRouteSignature !== getRouteSignature(waypoints)) {
@@ -1322,7 +1349,7 @@ export default function App() {
   return (
     <div className={cn("h-screen flex flex-col bg-background selection:bg-primary/30", isDarkMode ? "dark" : "")}>
       {/* Top Header */}
-      <header className="h-16 border-b border-outline/20 bg-surface/50 backdrop-blur-xl flex items-center justify-between px-6 z-50 fixed top-0 w-full">
+      <header className="h-16 border-b border-outline/20 bg-surface/50 backdrop-blur-xl hidden md:flex items-center justify-between px-6 z-50 fixed top-0 w-full">
         <div className="flex items-center gap-4">
           <button 
             className="md:hidden text-on-surface-variant hover:text-on-surface p-2"
@@ -1382,17 +1409,16 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex flex-1 pt-16 overflow-hidden">
+      <div className="flex flex-1 md:pt-16 overflow-hidden">
         {/* Sidebar */}
         <AnimatePresence>
-          {(isSidebarOpen || window.innerWidth >= 768) && (
+          {(!isMobileViewport || isSidebarOpen) && (
             <motion.aside 
               initial={{ x: -320 }}
               animate={{ x: 0 }}
               exit={{ x: -320 }}
               className={cn(
-                "w-[340px] lg:w-[400px] border-r border-outline/20 bg-surface-low/50 backdrop-blur-md flex flex-col z-40 fixed md:static inset-y-0 left-0 pt-16 md:pt-0 h-full",
-                !isSidebarOpen && "hidden"
+                "w-[340px] lg:w-[400px] border-r border-outline/20 bg-surface-low/50 backdrop-blur-md flex flex-col z-40 fixed md:static inset-y-0 left-0 pt-0 h-full"
               )}
             >
               <div className="p-6 border-b border-outline/20">
@@ -1745,8 +1771,8 @@ export default function App() {
             {/* Leaflet Map */}
             <div className="absolute inset-0 z-0 h-full w-full">
                <MapContainer 
-                center={[65, -20]} 
-                zoom={3} 
+                center={initialMapCenter}
+                zoom={initialMapZoom}
                 style={{ height: "100%", width: "100%" }}
                 zoomControl={false}
                 attributionControl={false}
@@ -1876,7 +1902,9 @@ export default function App() {
         )}
       </div>
 
-      <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} t={t} />
+      {(!isMobileViewport || isSidebarOpen) && (
+        <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} t={t} />
+      )}
 
       {/* Global Mobile Menu Overlay */}
       <AnimatePresence>

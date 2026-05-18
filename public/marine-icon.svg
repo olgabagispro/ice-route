@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Marine icon">
+  <rect width="64" height="64" rx="14" fill="#0b253a"/>
+  <path fill="#dff7ff" d="M32 9 46 40H18L32 9Z"/>
+  <path fill="#5bd6ff" d="M32 9v31h14L32 9Z"/>
+  <path fill="#ffffff" d="M31 18 24 34h7V18Z" opacity=".9"/>
+  <path fill="#0f4f6c" d="M10 44c4.6 0 4.6-3 9.2-3s4.6 3 9.2 3 4.6-3 9.2-3 4.6 3 9.2 3 4.6-3 9.2-3v7c-4.6 0-4.6 3-9.2 3s-4.6-3-9.2-3-4.6 3-9.2 3-4.6-3-9.2-3-4.6 3-9.2 3v-7Z"/>
+  <path fill="#8eeaff" d="M10 49c4.6 0 4.6-3 9.2-3s4.6 3 9.2 3 4.6-3 9.2-3 4.6 3 9.2 3 4.6-3 9.2-3v5c-4.6 0-4.6 3-9.2 3s-4.6-3-9.2-3-4.6 3-9.2 3-4.6-3-9.2-3-4.6 3-9.2 3v-5Z"/>
+</svg>

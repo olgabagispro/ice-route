@@ -1542,7 +1542,6 @@ export default function App() {
                     <X size={20} />
                   </button>
                 </div>
-                <p className="text-xs font-mono text-on-surface-variant uppercase tracking-widest">{t("vesselReadiness")}</p>
               </div>
 
               <div className="flex-1 overflow-y-auto custom-scrollbar p-0 space-y-0 pb-32 md:pb-8">
